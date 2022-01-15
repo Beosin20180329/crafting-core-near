@@ -226,7 +226,7 @@ impl Contract {
         let mut account = self.internal_unwrap_account(&caller);
         account.withdraw(&collateral.token, collateral.token_amount);
         self.internal_save_account(&caller, account);
-        self.internal_send_tokens(&caller, &collateral.token, amount)
+        self.internal_send_tokens(&caller, &collateral.token, collateral.token_amount)
     }
 }
 
