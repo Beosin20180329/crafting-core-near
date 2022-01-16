@@ -16,14 +16,14 @@ impl PriceInfo {
     }
 
     /// Returns the price of assets.
-    pub fn get_price(&self, asset: AccountId) -> u128 {
-        let opt = self.prices.get(&asset);
+    pub fn get_price(&self, asset: &AccountId) -> u128 {
+        let opt = self.prices.get(asset);
         assert!(opt.is_some());
         opt.unwrap()
     }
 
     /// Feed the price of assets.
-    pub fn feed_price(&mut self, asset: AccountId, price: u128) {
-        self.prices.insert(&asset, &price);
+    pub fn feed_price(&mut self, asset: &AccountId, price: u128) {
+        self.prices.insert(asset, &price);
     }
 }
