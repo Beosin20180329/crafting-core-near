@@ -132,8 +132,8 @@ impl Contract {
 
     #[payable]
     pub fn mint(&mut self, token: ValidAccountId, raft: ValidAccountId, raft_amount: Balance, join_debtpool: bool) {
-        assert!(self.is_in_whitelisted_tokens(token.as_ref().clone()));
-        assert!(self.is_in_whitelisted_rafts(raft.as_ref().clone()));
+        assert!(self.is_in_whitelisted_tokens(token.as_ref()));
+        assert!(self.is_in_whitelisted_rafts(raft.as_ref()));
 
         let token_amount = env::attached_deposit();
         assert!(token_amount > 0, "{}", errors::NoAttachedDeposit);
@@ -141,30 +141,30 @@ impl Contract {
 
         let caller = env::predecessor_account_id();
         if join_debtpool {
-            let token_decimals = self.query_token(token.as_ref().clone()).unwrap().decimals;
-            let raft_decimals = self.query_raft(raft.as_ref().clone()).unwrap().decimals;
+            let token_decimals = self.query_token(token.as_ref()).unwrap().decimals;
+            let raft_decimals = self.query_raft(raft.as_ref()).unwrap().decimals;
 
-            let leverage_ratio = (self.price_oracle.get_price(raft.as_ref().clone()) * raft_amount * 10u128.pow(token_decimals))
-                 / (self.price_oracle.get_price(token.as_ref().clone()) * token_amount * 10u128.pow(raft_decimals));
+            let leverage_ratio = (self.price_oracle.get_price(raft.as_ref()) * raft_amount * 10u128.pow(token_decimals))
+                 / (self.price_oracle.get_price(token.as_ref()) * token_amount * 10u128.pow(raft_decimals));
 
             let (min, max) = self.leverage_ratio;
             assert!(leverage_ratio >= min.into());
             assert!(leverage_ratio <= max.into());
 
-            self.debt_pool.join(&self.price_oracle, caller.clone(), raft.as_ref().clone(), raft_amount);
+            self.debt_pool.join(&self.price_oracle, &caller, raft.as_ref(), raft_amount);
         } else {
-            let token_asset = self.query_token(token.as_ref().clone()).unwrap();
-            let raft_asset = self.query_token(raft.as_ref().clone()).unwrap();
+            let token_asset = self.query_token(token.as_ref()).unwrap();
+            let raft_asset = self.query_token(raft.as_ref()).unwrap();
 
             let token_decimals = token_asset.decimals;
             let raft_decimals = raft_asset.decimals;
 
-            let collateral_ratio = (self.price_oracle.get_price(token.as_ref().clone()) * token_amount * 10u128.pow(raft_decimals) * 100)
-                / (self.price_oracle.get_price(raft.as_ref().clone()) * raft_amount * 10u128.pow(token_decimals));
+            let collateral_ratio = (self.price_oracle.get_price(token.as_ref()) * token_amount * 10u128.pow(raft_decimals) * 100)
+                / (self.price_oracle.get_price(raft.as_ref()) * raft_amount * 10u128.pow(token_decimals));
 
             assert!(collateral_ratio >= token_asset.collateral_ratio);
 
-            self.account_book.mint(caller.clone(), raft.as_ref().clone(), raft_amount);
+            self.account_book.mint(&caller, raft.as_ref(), raft_amount);
         }
 
         let collateral = Collateral {
@@ -183,14 +183,13 @@ impl Contract {
     }
 
     pub fn swap(&mut self, old_raft: ValidAccountId, new_raft: ValidAccountId, swap_amount: Balance) {
-        assert!(self.is_in_whitelisted_rafts(old_raft.as_ref().clone()));
-        assert!(self.is_in_whitelisted_rafts(new_raft.as_ref().clone()));
+        assert!(self.is_in_whitelisted_rafts(old_raft.as_ref()));
+        assert!(self.is_in_whitelisted_rafts(new_raft.as_ref()));
         assert!(swap_amount > 0);
 
         let caller = env::predecessor_account_id();
-        self.debt_pool.swap(caller, old_raft.as_ref().clone(),
-                            new_raft.as_ref().clone(), swap_amount,
-                            &self.price_oracle,self.owner_id.clone(), self.exchange_fee);
+        self.debt_pool.swap(&caller, old_raft.as_ref(), new_raft.as_ref(),
+                            swap_amount, &self.price_oracle, &self.owner_id, self.exchange_fee);
     }
 
     #[payable]
@@ -207,21 +206,21 @@ impl Contract {
         assert_eq!(collateral.join_debtpool, false);
         assert_eq!(collateral.state, 0);
 
-        let raft_amount = self.account_book.query_raft_amount(collateral.raft.clone());
-        let user_raft_amount = self.account_book.query_user_raft_amount(caller.clone(), collateral.raft.clone());
+        let raft_amount = self.account_book.query_raft_amount(&collateral.raft);
+        let user_raft_amount = self.account_book.query_user_raft_amount(&caller, &collateral.raft);
         let interest_fee_amount = collateral.raft_amount * self.interest_fee as u128 / utils::FEE_DIVISOR as u128;
         assert!(raft_amount > collateral.raft_amount + interest_fee_amount);
         assert!(user_raft_amount > collateral.raft_amount + interest_fee_amount);
 
         // charge interest fee
-        let owner_raft_amount = self.account_book.query_user_raft_amount(self.owner_id.clone(), collateral.raft.clone());
-        self.account_book.insert_user_raft_amount(self.owner_id.clone(), collateral.raft.clone(), owner_raft_amount + interest_fee_amount);
+        let owner_raft_amount = self.account_book.query_user_raft_amount(&self.owner_id, &collateral.raft);
+        self.account_book.insert_user_raft_amount(&self.owner_id, &collateral.raft, owner_raft_amount + interest_fee_amount);
 
         // subtract user raft amount
-        self.account_book.insert_user_raft_amount(caller.clone(), collateral.raft.clone(), user_raft_amount - collateral.raft_amount);
+        self.account_book.insert_user_raft_amount(&caller, &collateral.raft, user_raft_amount - collateral.raft_amount);
 
         // subtract total raft amount
-        self.account_book.insert_raft_amount(collateral.raft.clone(), raft_amount - collateral.raft_amount);
+        self.account_book.insert_raft_amount(&collateral.raft, raft_amount - collateral.raft_amount);
 
         let mut account = self.internal_unwrap_account(&caller);
         account.withdraw(&collateral.token, collateral.token_amount);
@@ -239,28 +238,28 @@ impl Contract {
         };
     }
 
-    fn is_in_whitelisted_tokens(&self, token: AccountId) -> bool {
-        if self.whitelisted_tokens.contains(&token) {
+    fn is_in_whitelisted_tokens(&self, token: &AccountId) -> bool {
+        if self.whitelisted_tokens.contains(token) {
             return true;
         }
 
         false
     }
 
-    fn query_token(&self, token: AccountId) -> Option<Asset> {
-        self.token_list.get(&token)
+    fn query_token(&self, token: &AccountId) -> Option<Asset> {
+        self.token_list.get(token)
     }
 
-    fn is_in_whitelisted_rafts(&self, raft: AccountId) -> bool {
-        if self.whitelisted_rafts.contains(&raft) {
+    fn is_in_whitelisted_rafts(&self, raft: &AccountId) -> bool {
+        if self.whitelisted_rafts.contains(raft) {
             return true;
         }
 
         false
     }
 
-    fn query_raft(&self, raft: AccountId) -> Option<Asset> {
-        self.raft_list.get(&raft)
+    fn query_raft(&self, raft: &AccountId) -> Option<Asset> {
+        self.raft_list.get(raft)
     }
 
     fn query_collateral(&self, collateral_id: CollateralId) -> Option<Collateral> {
