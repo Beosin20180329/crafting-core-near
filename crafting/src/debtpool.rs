@@ -24,82 +24,90 @@ impl DebtPool {
         }
     }
 
-    pub fn join(&mut self, price_oracle: &oracle::PriceInfo, user: AccountId, raft: AccountId, raft_amount: Balance) {
+    pub fn join(&mut self, price_oracle: &oracle::PriceInfo, user: &AccountId, raft: &AccountId, raft_amount: Balance) {
         if self.raft_amounts.is_empty() {
-            self.raft_amounts.insert(&raft, &raft_amount);
-            self.user_raft_amounts.insert(&(user.clone(), raft), &raft_amount);
-            self.debt_ratios.insert(user, utils::RATIO_DIVISOR);
+            self.insert_raft_amount(raft, raft_amount);
+            self.insert_user_raft_amount(user, raft, raft_amount);
+            self.debt_ratios.insert(user.clone(), utils::RATIO_DIVISOR);
         } else {
             let old_total_value = self.calc_raft_total_value(price_oracle);
 
-            let old_amount = self.query_raft_amount(raft.clone());
-            self.raft_amounts.insert(&raft, &(old_amount + raft_amount));
+            let old_amount = self.query_raft_amount(raft);
+            self.insert_raft_amount(raft, old_amount + raft_amount);
 
-            let old_amount = self.query_user_raft_amount(user.clone(), raft.clone());
-            self.user_raft_amounts.insert(&(user.clone(), raft.clone()), &(old_amount + raft_amount));
+            let old_amount = self.query_user_raft_amount(user, raft);
+            self.insert_user_raft_amount(user, raft, old_amount + raft_amount);
 
-            let join_raft_value = self.calc_raft_value(price_oracle, raft.clone(), raft_amount);
+            let join_raft_value = self.calc_raft_value(price_oracle, raft, raft_amount);
             let new_total_value = old_total_value + join_raft_value;
 
-            self.calc_debt_ratio(old_total_value, new_total_value, user);
+            self.calc_debt_ratio(old_total_value, new_total_value, user.clone());
         }
     }
 
-    pub fn swap(&mut self, user: AccountId, old_raft: AccountId, new_raft: AccountId,
-                swap_amount: Balance, price_oracle: &oracle::PriceInfo, owner_id: AccountId, exchange_fee: u32) {
-        let old_amount = self.query_raft_amount(old_raft.clone());
+    pub fn swap(&mut self, user: &AccountId, old_raft: &AccountId, new_raft: &AccountId,
+                swap_amount: Balance, price_oracle: &oracle::PriceInfo, owner_id: &AccountId, exchange_fee: u32) {
+        let old_amount = self.query_raft_amount(old_raft);
         assert!(old_amount >= swap_amount);
-        self.raft_amounts.insert(&old_raft, &(old_amount - swap_amount));
+        self.insert_raft_amount(old_raft, old_amount - swap_amount);
 
         // charge transaction fee
         let exchange_fee_amount = swap_amount * exchange_fee as u128 / utils::FEE_DIVISOR as u128;
-        let owner_raft_amount = self.query_user_raft_amount(owner_id.clone(), old_raft.clone());
-        self.user_raft_amounts.insert(&(owner_id.clone(), old_raft.clone()), &(owner_raft_amount + exchange_fee_amount));
+        let owner_raft_amount = self.query_user_raft_amount(owner_id, old_raft);
+        self.insert_user_raft_amount(owner_id, old_raft, owner_raft_amount + exchange_fee_amount);
 
-        let new_swap_amount = self.calc_raft_value(price_oracle, old_raft.clone(), swap_amount - exchange_fee_amount)
-            / price_oracle.get_price(new_raft.clone());
-        let new_amount = self.query_raft_amount(new_raft.clone());
-        self.raft_amounts.insert(&new_raft, &(new_amount + new_swap_amount));
+        let new_swap_amount = self.calc_raft_value(price_oracle, old_raft, swap_amount - exchange_fee_amount)
+            / price_oracle.get_price(new_raft);
+        let new_amount = self.query_raft_amount(new_raft);
+        self.insert_raft_amount(new_raft, new_amount + new_swap_amount);
 
-        let old_amount = self.query_user_raft_amount(user.clone(), old_raft.clone());
+        let old_amount = self.query_user_raft_amount(user, old_raft);
         assert!(old_amount >= swap_amount);
-        self.user_raft_amounts.insert(&(user.clone(), old_raft.clone()), &(old_amount - swap_amount));
+        self.insert_user_raft_amount(user, old_raft, old_amount - swap_amount);
 
-        let new_amount = self.query_user_raft_amount(user.clone(), new_raft.clone());
-        self.user_raft_amounts.insert(&(user.clone(), new_raft.clone()), &(new_amount + new_swap_amount));
+        let new_amount = self.query_user_raft_amount(user, new_raft);
+        self.insert_user_raft_amount(user, new_raft, new_amount + new_swap_amount);
     }
 
-    pub(crate) fn query_raft_amount(&self, raft: AccountId) -> Balance {
-        self.raft_amounts.get(&raft).unwrap_or(0)
+    pub(crate) fn query_raft_amount(&self, raft: &AccountId) -> Balance {
+        self.raft_amounts.get(raft).unwrap_or(0)
     }
 
-    pub(crate) fn query_user_raft_amount(&self, user: AccountId, raft: AccountId) -> Balance {
-        self.user_raft_amounts.get(&(user, raft)).unwrap_or(0)
+    pub(crate) fn insert_raft_amount(&mut self, raft: &AccountId, amount: Balance) {
+        self.raft_amounts.insert(raft, &amount);
     }
 
-    pub(crate) fn calc_raft_value(&self, price_oracle: &oracle::PriceInfo, raft: AccountId, amount: Balance) -> u128 {
+    pub(crate) fn query_user_raft_amount(&self, user: &AccountId, raft: &AccountId) -> Balance {
+        self.user_raft_amounts.get(&(user.clone(), raft.clone())).unwrap_or(0)
+    }
+
+    pub(crate) fn insert_user_raft_amount(&mut self, user: &AccountId, raft: &AccountId, amount: Balance) {
+        self.user_raft_amounts.insert(&(user.clone(), raft.clone()), &amount);
+    }
+
+    pub(crate) fn calc_raft_value(&self, price_oracle: &oracle::PriceInfo, raft: &AccountId, amount: Balance) -> u128 {
         price_oracle.get_price(raft) * amount
     }
 
-    pub(crate) fn query_debt_ratio(&self, user: AccountId) -> u128 {
-        self.debt_ratios.get(&user).copied().unwrap_or(0)
+    pub(crate) fn query_debt_ratio(&self, user: &AccountId) -> u128 {
+        self.debt_ratios.get(user).copied().unwrap_or(0)
     }
 
     pub(crate) fn calc_raft_total_value(&self, price_oracle: &oracle::PriceInfo) -> u128 {
         let mut total: u128 = 0;
         for (raft, amount) in self.raft_amounts.iter() {
-            total += self.calc_raft_value(price_oracle, raft, amount);
+            total += self.calc_raft_value(price_oracle, &raft, amount);
         }
 
         total
     }
 
-    pub(crate) fn calc_user_raft_total_value(&self, price_oracle: &oracle::PriceInfo, user: AccountId) -> u128 {
+    pub(crate) fn calc_user_raft_total_value(&self, price_oracle: &oracle::PriceInfo, user: &AccountId) -> u128 {
         let mut total: u128 = 0;
         for (raft, _) in self.raft_amounts.iter() {
-            let amount = self.query_user_raft_amount(user.clone(), raft.clone());
+            let amount = self.query_user_raft_amount(user, &raft);
             if amount != 0 {
-                total += self.calc_raft_value(price_oracle, raft.clone(), amount);
+                total += self.calc_raft_value(price_oracle, &raft, amount);
             }
         }
 
