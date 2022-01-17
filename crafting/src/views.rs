@@ -55,9 +55,9 @@ impl Contract {
         }
 
         for collateral_id in collateral_ids.unwrap().iter() {
-            let collateral = self.query_collateral(collateral_id);
-            if collateral.is_some() {
-                vec.push(collateral.unwrap());
+            let opt_collateral = self.query_collateral(collateral_id);
+            if opt_collateral.is_some() {
+                vec.push(opt_collateral.unwrap());
             }
         }
 
