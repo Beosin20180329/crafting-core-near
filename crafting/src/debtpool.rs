@@ -45,30 +45,6 @@ impl DebtPool {
         }
     }
 
-    pub fn swap(&mut self, user: &AccountId, old_raft: &AccountId, new_raft: &AccountId,
-                swap_amount: Balance, price_oracle: &oracle::PriceInfo, owner_id: &AccountId, exchange_fee: u32) {
-        let old_amount = self.query_raft_amount(old_raft);
-        assert!(old_amount >= swap_amount);
-        self.insert_raft_amount(old_raft, old_amount - swap_amount);
-
-        // charge transaction fee
-        let exchange_fee_amount = swap_amount * exchange_fee as u128 / utils::FEE_DIVISOR as u128;
-        let owner_raft_amount = self.query_user_raft_amount(owner_id, old_raft);
-        self.insert_user_raft_amount(owner_id, old_raft, owner_raft_amount + exchange_fee_amount);
-
-        let new_swap_amount = self.calc_raft_value(price_oracle, old_raft, swap_amount - exchange_fee_amount)
-            / price_oracle.get_price(new_raft);
-        let new_amount = self.query_raft_amount(new_raft);
-        self.insert_raft_amount(new_raft, new_amount + new_swap_amount);
-
-        let old_amount = self.query_user_raft_amount(user, old_raft);
-        assert!(old_amount >= swap_amount);
-        self.insert_user_raft_amount(user, old_raft, old_amount - swap_amount);
-
-        let new_amount = self.query_user_raft_amount(user, new_raft);
-        self.insert_user_raft_amount(user, new_raft, new_amount + new_swap_amount);
-    }
-
     pub(crate) fn query_raft_amount(&self, raft: &AccountId) -> Balance {
         self.raft_amounts.get(raft).unwrap_or(0)
     }
