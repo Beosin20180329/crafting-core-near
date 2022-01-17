@@ -17,6 +17,9 @@ pub const FEE_DIVISOR: u32 = 1_000;
 /// Ratio divisor, allowing to provide fee in bps.
 pub const RATIO_DIVISOR: u128 = 1_000_000;
 
+/// Price precision, allowing to provide fee in bps.
+pub const PRICE_PRECISION: u32 = 100_000;
+
 #[ext_contract(ext_self)]
 pub trait CrfExchange {
     fn exchange_callback_post_withdraw(
