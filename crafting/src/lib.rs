@@ -182,14 +182,33 @@ impl Contract {
         self.collaterals.push(&collateral);
     }
 
-    pub fn swap(&mut self, old_raft: ValidAccountId, new_raft: ValidAccountId, swap_amount: Balance) {
+    pub fn swap_in_debtpool(&mut self, old_raft: ValidAccountId, new_raft: ValidAccountId, swap_amount: Balance) {
         assert!(self.is_in_whitelisted_rafts(old_raft.as_ref()));
         assert!(self.is_in_whitelisted_rafts(new_raft.as_ref()));
         assert!(swap_amount > 0);
 
         let caller = env::predecessor_account_id();
-        self.debt_pool.swap(&caller, old_raft.as_ref(), new_raft.as_ref(),
-                            swap_amount, &self.price_oracle, &self.owner_id, self.exchange_fee);
+
+        let old_amount = self.debt_pool.query_raft_amount(old_raft.as_ref());
+        assert!(old_amount >= swap_amount);
+        self.debt_pool.insert_raft_amount(old_raft.as_ref(), old_amount - swap_amount);
+
+        // charge transaction fee
+        let exchange_fee_amount = swap_amount * self.exchange_fee as u128 / utils::FEE_DIVISOR as u128;
+        let owner_raft_amount = self.debt_pool.query_user_raft_amount(&self.owner_id, old_raft.as_ref());
+        self.debt_pool.insert_user_raft_amount(&self.owner_id, old_raft.as_ref(), owner_raft_amount + exchange_fee_amount);
+
+        let new_swap_amount = self.debt_pool.calc_raft_value(&self.price_oracle, old_raft.as_ref(), swap_amount - exchange_fee_amount)
+            / &self.price_oracle.get_price(new_raft.as_ref());
+        let new_amount = self.debt_pool.query_raft_amount(new_raft.as_ref());
+        self.debt_pool.insert_raft_amount(new_raft.as_ref(), new_amount + new_swap_amount);
+
+        let old_amount = self.debt_pool.query_user_raft_amount(&caller, old_raft.as_ref());
+        assert!(old_amount >= swap_amount);
+        self.debt_pool.insert_user_raft_amount(&caller, old_raft.as_ref(), old_amount - swap_amount);
+
+        let new_amount = self.debt_pool.query_user_raft_amount(&caller, new_raft.as_ref());
+        self.debt_pool.insert_user_raft_amount(&caller, new_raft.as_ref(), new_amount + new_swap_amount);
     }
 
     #[payable]
@@ -197,7 +216,7 @@ impl Contract {
         assert_one_yocto();
         self.assert_contract_running();
 
-        let opt_rusd = self.query_rUSD();
+        let opt_rusd = self.query_rusd();
         assert!(opt_rusd.is_some());
         let rusd_asset = opt_rusd.unwrap();
 
@@ -348,7 +367,7 @@ impl Contract {
         self.raft_list.get(raft)
     }
 
-    fn query_rUSD(&self) -> Option<Asset> {
+    fn query_rusd(&self) -> Option<Asset> {
         for (_, asset) in self.raft_list.iter() {
             if asset.symbol == "rUSD" {
                 return Some(asset);
