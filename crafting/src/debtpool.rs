@@ -28,7 +28,7 @@ impl DebtPool {
         if self.raft_amounts.is_empty() {
             self.insert_raft_amount(raft, raft_amount);
             self.insert_user_raft_amount(user, raft, raft_amount);
-            self.debt_ratios.insert(user.clone(), utils::RATIO_DIVISOR);
+            self.insert_debt_ratio(user.clone(), utils::RATIO_DIVISOR);
         } else {
             let old_total_value = self.calc_raft_total_value(price_oracle);
 
@@ -81,8 +81,24 @@ impl DebtPool {
         self.user_raft_amounts.get(&(user.clone(), raft.clone())).unwrap_or(0)
     }
 
+    pub(crate) fn query_user_raft_amounts(&self, user: &AccountId) -> Vec<(AccountId, Balance)> {
+        let mut vec: Vec<(AccountId, Balance)> = Vec::new();
+        for (raft, amount) in self.raft_amounts.iter() {
+            let amount = self.query_user_raft_amount(user, &raft);
+            if amount != 0 {
+                vec.push( (raft, amount));
+            }
+        }
+
+        vec
+    }
+
     pub(crate) fn insert_user_raft_amount(&mut self, user: &AccountId, raft: &AccountId, amount: Balance) {
         self.user_raft_amounts.insert(&(user.clone(), raft.clone()), &amount);
+    }
+
+    pub(crate) fn remove_user_raft_amount(&mut self, user: &AccountId, raft: &AccountId) {
+        self.user_raft_amounts.remove(&(user.clone(), raft.clone()));
     }
 
     pub(crate) fn calc_raft_value(&self, price_oracle: &oracle::PriceInfo, raft: &AccountId, amount: Balance) -> u128 {
@@ -91,6 +107,14 @@ impl DebtPool {
 
     pub(crate) fn query_debt_ratio(&self, user: &AccountId) -> u128 {
         self.debt_ratios.get(user).copied().unwrap_or(0)
+    }
+
+    pub(crate) fn insert_debt_ratio(&mut self, user: AccountId, debt_ratio: u128) {
+        self.debt_ratios.insert(user, debt_ratio);
+    }
+
+    pub(crate) fn remove_debt_ratio(&mut self, user: &AccountId) {
+        self.debt_ratios.remove(user);
     }
 
     pub(crate) fn calc_raft_total_value(&self, price_oracle: &oracle::PriceInfo) -> u128 {
@@ -130,7 +154,15 @@ impl DebtPool {
         }
 
         if is_new_user {
-            self.debt_ratios.insert(caller, (new_total_value - old_total_value) * utils::RATIO_DIVISOR / new_total_value);
+            self.insert_debt_ratio(caller, (new_total_value - old_total_value) * utils::RATIO_DIVISOR / new_total_value);
+        }
+    }
+
+    pub (crate) fn calc_all_debt_ratio(&mut self, old_total_value: u128, new_total_value: u128) {
+        if new_total_value == 0 { return; }
+
+        for (_, debt_ratio) in self.debt_ratios.iter_mut() {
+            *debt_ratio = (old_total_value * (*debt_ratio)) / new_total_value;
         }
     }
 }
