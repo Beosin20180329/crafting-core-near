@@ -28,7 +28,7 @@ pub type CollateralId = u64;
 pub(crate) enum StorageKey {
     Accounts,
     Whitelist,
-    AccountTokens {account_id: AccountId},
+    AccountTokens { account_id: AccountId },
 }
 
 #[derive(BorshDeserialize, BorshSerialize, Serialize, Deserialize, Eq, PartialEq, Clone)]
@@ -145,7 +145,7 @@ impl Contract {
             let raft_decimals = self.query_raft(raft.as_ref()).unwrap().decimals;
 
             let leverage_ratio = (self.price_oracle.get_price(raft.as_ref()) * raft_amount * 10u128.pow(token_decimals))
-                 / (self.price_oracle.get_price(token.as_ref()) * token_amount * 10u128.pow(raft_decimals));
+                / (self.price_oracle.get_price(token.as_ref()) * token_amount * 10u128.pow(raft_decimals));
 
             let (min, max) = self.leverage_ratio;
             assert!(leverage_ratio >= min.into());
@@ -193,7 +193,93 @@ impl Contract {
     }
 
     #[payable]
-    pub fn redeem_not_in_debtpool(&mut self, collateral_id: CollateralId) -> Promise {
+    pub fn redeem_in_debtpool(&mut self) {
+        assert_one_yocto();
+        self.assert_contract_running();
+
+        let opt_rusd = self.query_rUSD();
+        assert!(opt_rusd.is_some());
+        let rusd_asset = opt_rusd.unwrap();
+
+        // calculate user debt
+        let caller = env::predecessor_account_id();
+        let user_debt_ratio = self.debt_pool.query_debt_ratio(&caller);
+        let raft_total_value = self.debt_pool.calc_raft_total_value(&self.price_oracle);
+        let user_debt = raft_total_value * user_debt_ratio / utils::RATIO_DIVISOR;
+
+        if user_debt > 0 {
+            let user_rusd_amount_in_debtpool = self.debt_pool.query_user_raft_amount(&caller, &rusd_asset.address);
+            if user_debt <= user_rusd_amount_in_debtpool * utils::PRICE_PRECISION as u128 {
+                // subtract user raft amount
+                self.debt_pool.insert_user_raft_amount(&caller, &rusd_asset.address, user_rusd_amount_in_debtpool - user_debt / utils::PRICE_PRECISION as u128);
+
+                // subtract total raft amount
+                let rusd_amount = self.debt_pool.query_raft_amount(&rusd_asset.address);
+                self.debt_pool.insert_raft_amount(&rusd_asset.address, rusd_amount - user_debt / utils::PRICE_PRECISION as u128);
+
+                // remove user debt ratio
+                self.debt_pool.remove_debt_ratio(&caller);
+
+                // recalculating debt ratio
+                self.debt_pool.calc_all_debt_ratio(raft_total_value, raft_total_value - user_debt);
+            } else {
+                let user_rusd_amount_in_accountbook = self.account_book.query_user_raft_amount(&caller, &rusd_asset.address);
+                assert!(user_debt <= (user_rusd_amount_in_debtpool + user_rusd_amount_in_accountbook) * utils::PRICE_PRECISION as u128);
+
+                // remove user raft amount in debt pool
+                self.debt_pool.remove_user_raft_amount(&caller, &rusd_asset.address);
+
+                // subtract total raft amount in debt pool
+                let rusd_amount_in_debtpool = self.debt_pool.query_raft_amount(&rusd_asset.address);
+                self.debt_pool.insert_raft_amount(&rusd_asset.address, rusd_amount_in_debtpool - user_debt / utils::PRICE_PRECISION as u128);
+
+                // remove user debt ratio
+                self.debt_pool.remove_debt_ratio(&caller);
+
+                // recalculating debt ratio
+                self.debt_pool.calc_all_debt_ratio(raft_total_value, raft_total_value - user_debt);
+
+                let remaining_debt_amount = user_debt / utils::PRICE_PRECISION as u128 - user_rusd_amount_in_debtpool;
+                // subtract user raft amount in account book
+                self.account_book.insert_user_raft_amount(&caller, &rusd_asset.address, user_rusd_amount_in_accountbook - remaining_debt_amount);
+
+                // subtract total raft amount in account book
+                let rusd_amount_in_accountbook = self.account_book.query_raft_amount(&rusd_asset.address);
+                self.account_book.insert_raft_amount(&rusd_asset.address, rusd_amount_in_accountbook - remaining_debt_amount);
+            }
+        }
+
+        // transfer debt pool assets to account book
+        for (raft, amount) in self.debt_pool.query_user_raft_amounts(&caller).iter() {
+            let dp_amount = self.debt_pool.query_raft_amount(raft);
+            self.debt_pool.insert_raft_amount(raft, dp_amount - amount);
+            self.debt_pool.remove_user_raft_amount(&caller, raft);
+
+            let ab_amount = self.account_book.query_raft_amount(raft);
+            self.account_book.insert_raft_amount(raft, ab_amount + amount);
+
+            let ab_user_amount = self.account_book.query_user_raft_amount(&caller, raft);
+            self.account_book.insert_user_raft_amount(&caller, raft, ab_user_amount + amount);
+        }
+
+        // return of collateral assets
+        let collateral_ids: Option<Vector<CollateralId>> = self.user_collaterals.get(&caller);
+        if collateral_ids.is_some() {
+            for collateral_id in collateral_ids.unwrap().iter() {
+                let opt_collateral = self.query_collateral(collateral_id);
+                if opt_collateral.is_none() { continue; }
+                let collateral = opt_collateral.unwrap();
+
+                let mut account = self.internal_unwrap_account(&caller);
+                account.withdraw(&collateral.token, collateral.token_amount);
+                self.internal_save_account(&caller, account);
+                self.internal_send_tokens(&caller, &collateral.token, collateral.token_amount);
+            }
+        }
+    }
+
+    #[payable]
+    pub fn redeem_in_accountbook(&mut self, collateral_id: CollateralId) {
         assert_one_yocto();
         self.assert_contract_running();
 
@@ -225,7 +311,7 @@ impl Contract {
         let mut account = self.internal_unwrap_account(&caller);
         account.withdraw(&collateral.token, collateral.token_amount);
         self.internal_save_account(&caller, account);
-        self.internal_send_tokens(&caller, &collateral.token, collateral.token_amount)
+        self.internal_send_tokens(&caller, &collateral.token, collateral.token_amount);
     }
 }
 
@@ -260,6 +346,16 @@ impl Contract {
 
     fn query_raft(&self, raft: &AccountId) -> Option<Asset> {
         self.raft_list.get(raft)
+    }
+
+    fn query_rUSD(&self) -> Option<Asset> {
+        for (_, asset) in self.raft_list.iter() {
+            if asset.symbol == "rUSD" {
+                return Some(asset);
+            }
+        }
+
+        None
     }
 
     fn query_collateral(&self, collateral_id: CollateralId) -> Option<Collateral> {
