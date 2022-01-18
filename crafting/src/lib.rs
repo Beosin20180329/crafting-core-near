@@ -132,6 +132,9 @@ impl Contract {
 
     #[payable]
     pub fn mint(&mut self, token: ValidAccountId, raft: ValidAccountId, raft_amount: Balance, join_debtpool: bool) {
+        assert_one_yocto();
+        self.assert_contract_running();
+
         assert!(self.is_in_whitelisted_tokens(token.as_ref()));
         assert!(self.is_in_whitelisted_rafts(raft.as_ref()));
 
@@ -183,6 +186,8 @@ impl Contract {
     }
 
     pub fn swap_in_debtpool(&mut self, old_raft: ValidAccountId, new_raft: ValidAccountId, swap_amount: Balance) {
+        self.assert_contract_running();
+
         assert!(self.is_in_whitelisted_rafts(old_raft.as_ref()));
         assert!(self.is_in_whitelisted_rafts(new_raft.as_ref()));
         assert!(swap_amount > 0);
