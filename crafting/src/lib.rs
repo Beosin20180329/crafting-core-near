@@ -243,9 +243,6 @@ impl Contract {
 
                 // remove user debt ratio
                 self.debt_pool.remove_debt_ratio(&caller);
-
-                // recalculating debt ratio
-                self.debt_pool.calc_all_debt_ratio(raft_total_value, raft_total_value - user_debt);
             } else {
                 let user_rusd_amount_in_accountbook = self.account_book.query_user_raft_amount(&caller, &rusd_asset.address);
                 assert!(user_debt <= (user_rusd_amount_in_debtpool + user_rusd_amount_in_accountbook) * utils::PRICE_PRECISION as u128);
@@ -255,13 +252,10 @@ impl Contract {
 
                 // subtract total raft amount in debt pool
                 let rusd_amount_in_debtpool = self.debt_pool.query_raft_amount(&rusd_asset.address);
-                self.debt_pool.insert_raft_amount(&rusd_asset.address, rusd_amount_in_debtpool - user_debt / utils::PRICE_PRECISION as u128);
+                self.debt_pool.insert_raft_amount(&rusd_asset.address, rusd_amount_in_debtpool - user_rusd_amount_in_debtpool);
 
                 // remove user debt ratio
                 self.debt_pool.remove_debt_ratio(&caller);
-
-                // recalculating debt ratio
-                self.debt_pool.calc_all_debt_ratio(raft_total_value, raft_total_value - user_debt);
 
                 let remaining_debt_amount = user_debt / utils::PRICE_PRECISION as u128 - user_rusd_amount_in_debtpool;
                 // subtract user raft amount in account book
@@ -275,16 +269,20 @@ impl Contract {
 
         // transfer debt pool assets to account book
         for (raft, amount) in self.debt_pool.query_user_raft_amounts(&caller).iter() {
-            let dp_amount = self.debt_pool.query_raft_amount(raft);
-            self.debt_pool.insert_raft_amount(raft, dp_amount - amount);
+            let debtpool_raft_amount = self.debt_pool.query_raft_amount(raft);
+            self.debt_pool.insert_raft_amount(raft, debtpool_raft_amount - amount);
             self.debt_pool.remove_user_raft_amount(&caller, raft);
 
-            let ab_amount = self.account_book.query_raft_amount(raft);
-            self.account_book.insert_raft_amount(raft, ab_amount + amount);
+            let accountbook_raft_amount = self.account_book.query_raft_amount(raft);
+            self.account_book.insert_raft_amount(raft, accountbook_raft_amount + amount);
 
-            let ab_user_amount = self.account_book.query_user_raft_amount(&caller, raft);
-            self.account_book.insert_user_raft_amount(&caller, raft, ab_user_amount + amount);
+            let accountbook_user_raft_amount = self.account_book.query_user_raft_amount(&caller, raft);
+            self.account_book.insert_user_raft_amount(&caller, raft, accountbook_user_raft_amount + amount);
         }
+
+        // recalculating debt ratio
+        let new_raft_total_value = self.debt_pool.calc_raft_total_value(&self.price_oracle);
+        self.debt_pool.calc_all_debt_ratio(raft_total_value, new_raft_total_value);
 
         // return of collateral assets
         let collateral_ids: Option<Vector<CollateralId>> = self.user_collaterals.get(&caller);
@@ -327,7 +325,7 @@ impl Contract {
         self.account_book.insert_user_raft_amount(&self.owner_id, &collateral.raft, owner_raft_amount + interest_fee_amount);
 
         // subtract user raft amount
-        self.account_book.insert_user_raft_amount(&caller, &collateral.raft, user_raft_amount - collateral.raft_amount);
+        self.account_book.insert_user_raft_amount(&caller, &collateral.raft, user_raft_amount - collateral.raft_amount - interest_fee_amount);
 
         // subtract total raft amount
         self.account_book.insert_raft_amount(&collateral.raft, raft_amount - collateral.raft_amount);
