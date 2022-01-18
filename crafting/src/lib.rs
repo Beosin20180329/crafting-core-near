@@ -189,26 +189,26 @@ impl Contract {
 
         let caller = env::predecessor_account_id();
 
-        let old_amount = self.debt_pool.query_raft_amount(old_raft.as_ref());
-        assert!(old_amount >= swap_amount);
-        self.debt_pool.insert_raft_amount(old_raft.as_ref(), old_amount - swap_amount);
+        let old_raft_amount = self.debt_pool.query_raft_amount(old_raft.as_ref());
+        assert!(old_raft_amount >= swap_amount);
+        let old_user_raft_amount = self.debt_pool.query_user_raft_amount(&caller, old_raft.as_ref());
+        assert!(old_user_raft_amount >= swap_amount);
 
         // charge transaction fee
         let exchange_fee_amount = swap_amount * self.exchange_fee as u128 / utils::FEE_DIVISOR as u128;
         let owner_raft_amount = self.debt_pool.query_user_raft_amount(&self.owner_id, old_raft.as_ref());
         self.debt_pool.insert_user_raft_amount(&self.owner_id, old_raft.as_ref(), owner_raft_amount + exchange_fee_amount);
 
+        self.debt_pool.insert_raft_amount(old_raft.as_ref(), old_raft_amount - swap_amount + exchange_fee_amount);
+        self.debt_pool.insert_user_raft_amount(&caller, old_raft.as_ref(), old_user_raft_amount - swap_amount);
+
         let new_swap_amount = self.debt_pool.calc_raft_value(&self.price_oracle, old_raft.as_ref(), swap_amount - exchange_fee_amount)
             / &self.price_oracle.get_price(new_raft.as_ref());
-        let new_amount = self.debt_pool.query_raft_amount(new_raft.as_ref());
-        self.debt_pool.insert_raft_amount(new_raft.as_ref(), new_amount + new_swap_amount);
+        let new_raft_amount = self.debt_pool.query_raft_amount(new_raft.as_ref());
+        self.debt_pool.insert_raft_amount(new_raft.as_ref(), new_raft_amount + new_swap_amount);
 
-        let old_amount = self.debt_pool.query_user_raft_amount(&caller, old_raft.as_ref());
-        assert!(old_amount >= swap_amount);
-        self.debt_pool.insert_user_raft_amount(&caller, old_raft.as_ref(), old_amount - swap_amount);
-
-        let new_amount = self.debt_pool.query_user_raft_amount(&caller, new_raft.as_ref());
-        self.debt_pool.insert_user_raft_amount(&caller, new_raft.as_ref(), new_amount + new_swap_amount);
+        let new_user_raft_amount = self.debt_pool.query_user_raft_amount(&caller, new_raft.as_ref());
+        self.debt_pool.insert_user_raft_amount(&caller, new_raft.as_ref(), new_user_raft_amount + new_swap_amount);
     }
 
     #[payable]
