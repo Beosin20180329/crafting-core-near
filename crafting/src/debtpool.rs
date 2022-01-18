@@ -59,7 +59,7 @@ impl DebtPool {
 
     pub(crate) fn query_user_raft_amounts(&self, user: &AccountId) -> Vec<(AccountId, Balance)> {
         let mut vec: Vec<(AccountId, Balance)> = Vec::new();
-        for (raft, amount) in self.raft_amounts.iter() {
+        for (raft, _) in self.raft_amounts.iter() {
             let amount = self.query_user_raft_amount(user, &raft);
             if amount != 0 {
                 vec.push( (raft, amount));
