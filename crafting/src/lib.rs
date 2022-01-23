@@ -9,7 +9,7 @@ use near_sdk::collections::{LookupMap, UnorderedMap, UnorderedSet, Vector};
 use near_sdk::json_types::{ValidAccountId};
 use near_sdk::serde::{Deserialize, Serialize};
 
-use crate::account::{VAccount, Account};
+use crate::account::VAccount;
 
 mod account;
 mod accountbook;
@@ -195,7 +195,6 @@ impl Contract {
         let caller = env::predecessor_account_id();
 
         let old_raft_amount = self.debt_pool.query_raft_amount(old_raft.as_ref());
-        assert!(old_raft_amount >= swap_amount);
         let old_user_raft_amount = self.debt_pool.query_user_raft_amount(&caller, old_raft.as_ref());
         assert!(old_user_raft_amount >= swap_amount);
 
@@ -204,13 +203,13 @@ impl Contract {
         let owner_raft_amount = self.debt_pool.query_user_raft_amount(&self.owner_id, old_raft.as_ref());
         self.debt_pool.insert_user_raft_amount(&self.owner_id, old_raft.as_ref(), owner_raft_amount + exchange_fee_amount);
 
-        self.debt_pool.insert_raft_amount(old_raft.as_ref(), old_raft_amount - swap_amount + exchange_fee_amount);
+        self.debt_pool.calc_sub_raft_amount(old_raft.as_ref(), &old_raft_amount, swap_amount - exchange_fee_amount);
         self.debt_pool.insert_user_raft_amount(&caller, old_raft.as_ref(), old_user_raft_amount - swap_amount);
 
         let new_swap_amount = self.debt_pool.calc_raft_value(&self.price_oracle, old_raft.as_ref(), swap_amount - exchange_fee_amount)
             / &self.price_oracle.get_price(new_raft.as_ref());
         let new_raft_amount = self.debt_pool.query_raft_amount(new_raft.as_ref());
-        self.debt_pool.insert_raft_amount(new_raft.as_ref(), new_raft_amount + new_swap_amount);
+        self.debt_pool.calc_add_raft_amount(new_raft.as_ref(), &new_raft_amount, new_swap_amount);
 
         let new_user_raft_amount = self.debt_pool.query_user_raft_amount(&caller, new_raft.as_ref());
         self.debt_pool.insert_user_raft_amount(&caller, new_raft.as_ref(), new_user_raft_amount + new_swap_amount);
@@ -233,31 +232,33 @@ impl Contract {
 
         if user_debt > 0 {
             let user_rusd_amount_in_debtpool = self.debt_pool.query_user_raft_amount(&caller, &rusd_asset.address);
+            let user_debt_amount = user_debt / utils::PRICE_PRECISION as u128;
             if user_debt <= user_rusd_amount_in_debtpool * utils::PRICE_PRECISION as u128 {
                 // subtract user raft amount
-                self.debt_pool.insert_user_raft_amount(&caller, &rusd_asset.address, user_rusd_amount_in_debtpool - user_debt / utils::PRICE_PRECISION as u128);
+                self.debt_pool.insert_user_raft_amount(&caller, &rusd_asset.address, user_rusd_amount_in_debtpool - user_debt_amount);
 
                 // subtract total raft amount
                 let rusd_amount = self.debt_pool.query_raft_amount(&rusd_asset.address);
-                self.debt_pool.insert_raft_amount(&rusd_asset.address, rusd_amount - user_debt / utils::PRICE_PRECISION as u128);
+                self.debt_pool.calc_sub_raft_amount(&rusd_asset.address, &rusd_amount, user_debt_amount);
 
                 // remove user debt ratio
                 self.debt_pool.remove_debt_ratio(&caller);
             } else {
                 let user_rusd_amount_in_accountbook = self.account_book.query_user_raft_amount(&caller, &rusd_asset.address);
-                assert!(user_debt <= (user_rusd_amount_in_debtpool + user_rusd_amount_in_accountbook) * utils::PRICE_PRECISION as u128);
+                assert!(user_debt_amount <= user_rusd_amount_in_debtpool + user_rusd_amount_in_accountbook);
 
                 // remove user raft amount in debt pool
                 self.debt_pool.remove_user_raft_amount(&caller, &rusd_asset.address);
 
                 // subtract total raft amount in debt pool
                 let rusd_amount_in_debtpool = self.debt_pool.query_raft_amount(&rusd_asset.address);
-                self.debt_pool.insert_raft_amount(&rusd_asset.address, rusd_amount_in_debtpool - user_rusd_amount_in_debtpool);
+                self.debt_pool.calc_sub_raft_amount(&rusd_asset.address, &rusd_amount_in_debtpool,
+                                                    user_rusd_amount_in_debtpool);
 
                 // remove user debt ratio
                 self.debt_pool.remove_debt_ratio(&caller);
 
-                let remaining_debt_amount = user_debt / utils::PRICE_PRECISION as u128 - user_rusd_amount_in_debtpool;
+                let remaining_debt_amount = user_debt_amount - user_rusd_amount_in_debtpool;
                 // subtract user raft amount in account book
                 self.account_book.insert_user_raft_amount(&caller, &rusd_asset.address, user_rusd_amount_in_accountbook - remaining_debt_amount);
 
@@ -270,7 +271,7 @@ impl Contract {
         // transfer debt pool assets to account book
         for (raft, amount) in self.debt_pool.query_user_raft_amounts(&caller).iter() {
             let debtpool_raft_amount = self.debt_pool.query_raft_amount(raft);
-            self.debt_pool.insert_raft_amount(raft, debtpool_raft_amount - amount);
+            self.debt_pool.calc_sub_raft_amount(raft, &debtpool_raft_amount, *amount);
             self.debt_pool.remove_user_raft_amount(&caller, raft);
 
             let accountbook_raft_amount = self.account_book.query_raft_amount(raft);
