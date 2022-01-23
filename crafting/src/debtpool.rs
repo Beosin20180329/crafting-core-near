@@ -1,14 +1,21 @@
 use std::collections::HashMap;
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LookupMap, UnorderedMap};
-use near_sdk::{env, AccountId, Balance};
+use near_sdk::{AccountId, Balance};
 
 use crate::*;
+
+#[derive(Clone, BorshSerialize, BorshDeserialize, Serialize, Deserialize)]
+#[serde(crate = "near_sdk::serde")]
+pub struct WrappedBalance {
+    pub(crate) amount: Balance,
+    pub(crate) is_positive: bool,
+}
 
 #[derive(BorshSerialize, BorshDeserialize)]
 pub struct DebtPool {
     /// Mapping from raft to amount of raft that is in debt pool.
-    raft_amounts: UnorderedMap<AccountId, Balance>,
+    raft_amounts: UnorderedMap<AccountId, WrappedBalance>,
     /// Mapping from user and raft to amount of raft that is in debt pool.
     user_raft_amounts: LookupMap<(AccountId, AccountId), Balance>,
     /// Mapping from user to debt ratio.
@@ -26,17 +33,20 @@ impl DebtPool {
 
     pub fn join(&mut self, price_oracle: &oracle::PriceInfo, user: &AccountId, raft: &AccountId, raft_amount: Balance) {
         if self.raft_amounts.is_empty() {
-            self.insert_raft_amount(raft, raft_amount);
+            self.insert_raft_amount(raft, &WrappedBalance {
+                amount: raft_amount,
+                is_positive: true,
+            });
             self.insert_user_raft_amount(user, raft, raft_amount);
             self.insert_debt_ratio(user.clone(), utils::RATIO_DIVISOR);
         } else {
             let old_total_value = self.calc_raft_total_value(price_oracle);
 
-            let old_amount = self.query_raft_amount(raft);
-            self.insert_raft_amount(raft, old_amount + raft_amount);
+            let old_raft_amount = self.query_raft_amount(raft);
+            self.calc_add_raft_amount(raft, &old_raft_amount, raft_amount);
 
-            let old_amount = self.query_user_raft_amount(user, raft);
-            self.insert_user_raft_amount(user, raft, old_amount + raft_amount);
+            let old_user_raft_amount = self.query_user_raft_amount(user, raft);
+            self.insert_user_raft_amount(user, raft, old_user_raft_amount + raft_amount);
 
             let join_raft_value = self.calc_raft_value(price_oracle, raft, raft_amount);
             let new_total_value = old_total_value + join_raft_value;
@@ -45,12 +55,20 @@ impl DebtPool {
         }
     }
 
-    pub(crate) fn query_raft_amount(&self, raft: &AccountId) -> Balance {
-        self.raft_amounts.get(raft).unwrap_or(0)
+    pub(crate) fn query_raft_amount(&self, raft: &AccountId) -> WrappedBalance {
+        let opt_wbalance = self.raft_amounts.get(raft);
+        if opt_wbalance.is_some() {
+            opt_wbalance.unwrap();
+        }
+
+        return WrappedBalance{
+            amount: 0,
+            is_positive: true,
+        }
     }
 
-    pub(crate) fn insert_raft_amount(&mut self, raft: &AccountId, amount: Balance) {
-        self.raft_amounts.insert(raft, &amount);
+    pub(crate) fn insert_raft_amount(&mut self, raft: &AccountId, amount: &WrappedBalance) {
+        self.raft_amounts.insert(raft, amount);
     }
 
     pub(crate) fn query_user_raft_amount(&self, user: &AccountId, raft: &AccountId) -> Balance {
@@ -95,8 +113,8 @@ impl DebtPool {
 
     pub(crate) fn calc_raft_total_value(&self, price_oracle: &oracle::PriceInfo) -> u128 {
         let mut total: u128 = 0;
-        for (raft, amount) in self.raft_amounts.iter() {
-            total += self.calc_raft_value(price_oracle, &raft, amount);
+        for (raft, wbalance) in self.raft_amounts.iter() {
+            total += self.calc_raft_value(price_oracle, &raft, wbalance.amount);
         }
 
         total
@@ -139,6 +157,48 @@ impl DebtPool {
 
         for (_, debt_ratio) in self.debt_ratios.iter_mut() {
             *debt_ratio = (old_total_value * (*debt_ratio)) / new_total_value;
+        }
+    }
+
+    pub(crate) fn calc_add_raft_amount(&mut self, raft: &AccountId, raft_amount: &WrappedBalance, amount: Balance) {
+        if raft_amount.is_positive {
+            self.insert_raft_amount(raft, &WrappedBalance {
+                amount: raft_amount.amount + amount,
+                is_positive: true,
+            });
+        } else {
+            if raft_amount.amount >= amount {
+                self.insert_raft_amount(raft, &WrappedBalance {
+                    amount: raft_amount.amount - amount,
+                    is_positive: false,
+                });
+            } else {
+                self.insert_raft_amount(raft, &WrappedBalance {
+                    amount: amount - raft_amount.amount,
+                    is_positive: true,
+                });
+            }
+        }
+    }
+
+    pub(crate) fn calc_sub_raft_amount(&mut self, raft: &AccountId, raft_amount: &WrappedBalance, amount: Balance) {
+        if raft_amount.is_positive {
+            if raft_amount.amount >= amount {
+                self.insert_raft_amount(raft, &WrappedBalance {
+                    amount: raft_amount.amount - amount,
+                    is_positive: true,
+                });
+            } else {
+                self.insert_raft_amount(raft, &WrappedBalance {
+                    amount: amount - raft_amount.amount,
+                    is_positive: false,
+                });
+            }
+        } else {
+            self.insert_raft_amount(raft, &WrappedBalance {
+                amount: raft_amount.amount + amount,
+                is_positive: false,
+            });
         }
     }
 }
