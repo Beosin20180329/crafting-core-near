@@ -1,4 +1,4 @@
-use near_sdk::{ext_contract, AccountId, Balance, Gas};
+use near_sdk::{ext_contract, Balance, Gas};
 use near_sdk::json_types::U128;
 
 pub const NO_DEPOSIT: Balance = 0;
