@@ -1,4 +1,5 @@
 use crate::*;
+use crate::debtpool::WrappedBalance;
 
 #[near_bindgen]
 impl Contract {
@@ -65,16 +66,16 @@ impl Contract {
     }
 
     /// Debt Pool Related
-    pub fn debtpool_raft_amount(&self, raft: ValidAccountId) -> Balance {
+    pub fn debtpool_raft_amount(&self, raft: ValidAccountId) -> WrappedBalance {
         self.is_in_whitelisted_rafts(raft.as_ref());
 
         self.debt_pool.query_raft_amount(raft.as_ref())
     }
 
-    pub fn debtpool_raft_value(&self, raft: ValidAccountId) -> (Balance, u128) {
-        let amount = self.debtpool_raft_amount(raft.clone());
-        let value = self.debt_pool.calc_raft_value(&self.price_oracle, raft.as_ref(), amount);
-        (amount, value)
+    pub fn debtpool_raft_value(&self, raft: ValidAccountId) -> (WrappedBalance, u128) {
+        let raft_amount = self.debtpool_raft_amount(raft.clone());
+        let value = self.debt_pool.calc_raft_value(&self.price_oracle, raft.as_ref(), raft_amount.amount);
+        (raft_amount, value)
     }
 
     pub fn debtpool_raft_total_value(&self) -> u128 {
