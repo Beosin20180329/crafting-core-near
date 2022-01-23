@@ -1,6 +1,6 @@
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::{LookupMap, UnorderedMap};
-use near_sdk::{env, AccountId, Balance};
+use near_sdk::{AccountId, Balance};
 
 use crate::*;
 
