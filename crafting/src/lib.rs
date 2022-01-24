@@ -207,12 +207,51 @@ impl Contract {
         self.debt_pool.insert_user_raft_amount(&caller, old_raft.as_ref(), old_user_raft_amount - swap_amount);
 
         let new_swap_amount = self.debt_pool.calc_raft_value(&self.price_oracle, old_raft.as_ref(), swap_amount - exchange_fee_amount)
-            / &self.price_oracle.get_price(new_raft.as_ref());
+            / self.price_oracle.get_price(new_raft.as_ref());
         let new_raft_amount = self.debt_pool.query_raft_amount(new_raft.as_ref());
         self.debt_pool.calc_add_raft_amount(new_raft.as_ref(), &new_raft_amount, new_swap_amount);
 
         let new_user_raft_amount = self.debt_pool.query_user_raft_amount(&caller, new_raft.as_ref());
         self.debt_pool.insert_user_raft_amount(&caller, new_raft.as_ref(), new_user_raft_amount + new_swap_amount);
+    }
+
+    pub fn swap_in_accountbook(&mut self, old_raft: ValidAccountId, new_raft: ValidAccountId, swap_amount: Balance) {
+        self.assert_contract_running();
+
+        assert!(self.is_in_whitelisted_rafts(old_raft.as_ref()));
+        assert!(self.is_in_whitelisted_rafts(new_raft.as_ref()));
+        assert!(swap_amount > 0);
+
+        let caller = env::predecessor_account_id();
+
+        let old_raft_amount = self.account_book.query_raft_amount(old_raft.as_ref());
+        assert!(old_raft_amount >= swap_amount);
+        let old_user_raft_amount = self.account_book.query_user_raft_amount(&caller, old_raft.as_ref());
+        assert!(old_user_raft_amount >= swap_amount);
+
+        // charge transaction fee
+        let exchange_fee_amount = swap_amount * self.exchange_fee as u128 / utils::FEE_DIVISOR as u128;
+        let owner_raft_amount = self.account_book.query_user_raft_amount(&self.owner_id, old_raft.as_ref());
+        self.account_book.insert_user_raft_amount(&self.owner_id, old_raft.as_ref(), owner_raft_amount + exchange_fee_amount);
+
+        // processing in the account book
+        self.account_book.insert_raft_amount(old_raft.as_ref(), old_raft_amount - swap_amount + exchange_fee_amount);
+        self.account_book.insert_user_raft_amount(&caller, old_raft.as_ref(), old_user_raft_amount - swap_amount);
+
+        let new_swap_amount = self.price_oracle.get_price(old_raft.as_ref()) * (swap_amount - exchange_fee_amount)
+            / self.price_oracle.get_price(new_raft.as_ref());
+        let new_raft_amount = self.account_book.query_raft_amount(new_raft.as_ref());
+        self.account_book.insert_raft_amount(new_raft.as_ref(), new_raft_amount + new_swap_amount);
+
+        let new_user_raft_amount = self.account_book.query_user_raft_amount(&caller, new_raft.as_ref());
+        self.account_book.insert_user_raft_amount(&caller, new_raft.as_ref(), new_user_raft_amount + new_swap_amount);
+
+        // processing in the debt pool
+        let old_raft_amount = self.debt_pool.query_raft_amount(old_raft.as_ref());
+        self.debt_pool.calc_sub_raft_amount(old_raft.as_ref(), &old_raft_amount, new_swap_amount);
+
+        let new_raft_amount = self.debt_pool.query_raft_amount(new_raft.as_ref());
+        self.debt_pool.calc_add_raft_amount(new_raft.as_ref(), &new_raft_amount, new_swap_amount);
     }
 
     #[payable]
