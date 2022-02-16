@@ -23,7 +23,7 @@ pub struct DebtPool {
 }
 
 impl DebtPool {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             raft_amounts: UnorderedMap::new(b"r".to_vec()),
             user_raft_amounts: LookupMap::new(b"r".to_vec()),
@@ -31,7 +31,8 @@ impl DebtPool {
         }
     }
 
-    pub fn join(&mut self, price_oracle: &oracle::PriceInfo, user: &AccountId, raft: &AccountId, raft_amount: Balance) {
+    pub(crate) fn join(&mut self, price_oracle: &oracle::PriceInfo, user: &AccountId,
+                       raft: &AccountId, raft_amount: Balance) {
         if self.raft_amounts.is_empty() {
             self.insert_raft_amount(raft, &WrappedBalance {
                 amount: raft_amount,
@@ -103,7 +104,7 @@ impl DebtPool {
         self.debt_ratios.get(user).copied().unwrap_or(0)
     }
 
-    pub(crate) fn insert_debt_ratio(&mut self, user: AccountId, debt_ratio: u128) {
+    fn insert_debt_ratio(&mut self, user: AccountId, debt_ratio: u128) {
         self.debt_ratios.insert(user, debt_ratio);
     }
 
@@ -133,13 +134,13 @@ impl DebtPool {
     }
 
     /// Calculate the debt ratio.
-    fn calc_debt_ratio(&mut self, old_total_value: u128, new_total_value: u128, caller: AccountId) {
+    fn calc_debt_ratio(&mut self, old_total_value: u128, new_total_value: u128, sender_id: AccountId) {
         if new_total_value == 0 { return; }
 
         let mut is_new_user = true;
 
         for (user, debt_ratio) in self.debt_ratios.iter_mut() {
-            if *user != caller {
+            if *user != sender_id {
                 *debt_ratio = (old_total_value * (*debt_ratio)) / new_total_value;
             } else {
                 *debt_ratio = (old_total_value * (*debt_ratio) + (new_total_value - old_total_value) * utils::RATIO_DIVISOR) / new_total_value;
@@ -148,7 +149,7 @@ impl DebtPool {
         }
 
         if is_new_user {
-            self.insert_debt_ratio(caller, (new_total_value - old_total_value) * utils::RATIO_DIVISOR / new_total_value);
+            self.insert_debt_ratio(sender_id, (new_total_value - old_total_value) * utils::RATIO_DIVISOR / new_total_value);
         }
     }
 
