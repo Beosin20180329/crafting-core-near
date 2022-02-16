@@ -373,8 +373,15 @@ impl Contract {
         for collateral_id in collateral_ids.unwrap().iter() {
             let opt_collateral = self.query_collateral(collateral_id);
             if opt_collateral.is_none() { continue; }
-            let collateral = opt_collateral.unwrap();
+            let mut collateral = opt_collateral.unwrap();
+            if collateral.issuer != sender_id { continue; }
+            if collateral.join_debtpool == false { continue; }
+            if collateral.state != 0  { continue; }
 
+            // update collateral state
+            collateral.state = 1;
+            self.collaterals.replace(collateral_id, &collateral);
+            
             let mut account = self.internal_unwrap_account(&sender_id);
             account.withdraw(&collateral.token_id, collateral.token_amount);
             self.internal_save_account(&sender_id, account);
@@ -393,7 +400,7 @@ impl Contract {
         assert!(opt_collateral.is_some());
 
         let sender_id = env::predecessor_account_id();
-        let collateral = opt_collateral.unwrap();
+        let mut collateral = opt_collateral.unwrap();
         assert_eq!(collateral.issuer, sender_id);
         assert_eq!(collateral.join_debtpool, false);
         assert_eq!(collateral.state, 0);
@@ -414,6 +421,10 @@ impl Contract {
         // subtract total raft amount
         self.account_book.insert_raft_amount(&collateral.raft_id, raft_amount - collateral.raft_amount);
 
+        // update collateral state
+        collateral.state = 1;
+        self.collaterals.replace(collateral_id, &collateral);
+        
         let mut account = self.internal_unwrap_account(&sender_id);
         account.withdraw(&collateral.token_id, collateral.token_amount);
         self.internal_save_account(&sender_id, account);
