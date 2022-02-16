@@ -85,39 +85,39 @@ impl Account {
 
     /// Deposit amount to the balance of given token.
     /// if given token not register and not enough storage, deposit fails
-    pub(crate) fn deposit_with_storage_check(&mut self, token: &AccountId, amount: Balance) -> bool {
-        if let Some(balance) = self.tokens.get(token) {
+    pub(crate) fn deposit_with_storage_check(&mut self, token_id: &AccountId, amount: Balance) -> bool {
+        if let Some(balance) = self.tokens.get(token_id) {
             // token has been registered, just add without storage check
             let new_balance = balance + amount;
-            self.tokens.insert(token, &new_balance);
+            self.tokens.insert(token_id, &new_balance);
             true
         } else {
             // check storage after insert, if fail should unregister the token
-            self.tokens.insert(token, &(amount));
+            self.tokens.insert(token_id, &(amount));
             if self.storage_usage() <= self.near_amount {
                 true
             } else {
-                self.tokens.remove(token);
+                self.tokens.remove(token_id);
                 false
             }
         }
     }
 
     /// Deposit amount to the balance of given token.
-    pub(crate) fn deposit(&mut self, token: &AccountId, amount: Balance) {
-        if let Some(x) = self.tokens.get(token) {
-            self.tokens.insert(token, &(amount + x));
+    pub(crate) fn deposit(&mut self, token_id: &AccountId, amount: Balance) {
+        if let Some(x) = self.tokens.get(token_id) {
+            self.tokens.insert(token_id, &(amount + x));
         } else {
-            self.tokens.insert(token, &amount);
+            self.tokens.insert(token_id, &amount);
         }
     }
 
     /// Withdraw amount of `token` from the internal balance.
     /// Panics if `amount` is bigger than the current balance.
-    pub(crate) fn withdraw(&mut self, token: &AccountId, amount: Balance) {
-        if let Some(x) = self.tokens.get(token) {
+    pub(crate) fn withdraw(&mut self, token_id: &AccountId, amount: Balance) {
+        if let Some(x) = self.tokens.get(token_id) {
             assert!(x >= amount, "{}", errors::NOT_ENOUGH_TOKENS);
-            self.tokens.insert(token, &(x - amount));
+            self.tokens.insert(token_id, &(x - amount));
         } else {
             env::panic_str(errors::TOKEN_NOT_REG);
         }
