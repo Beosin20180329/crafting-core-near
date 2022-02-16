@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "./crafting",
-    "./token-test",
+    "./raft-token"
 ]
 
 [profile.release]
