@@ -3,20 +3,20 @@ use crate::*;
 #[near_bindgen]
 impl Contract {
     /// Change owner. Only can be called by owner.
-    pub fn set_owner(&mut self, owner_id: ValidAccountId) {
+    pub fn set_owner(&mut self, owner_id: AccountId) {
         self.assert_owner();
-        self.owner_id = owner_id.as_ref().clone();
+        self.owner_id = owner_id;
     }
 
     /// Change state of contract, Only can be called by owner or guardians.
     pub fn change_state(&mut self, state: RunningState) {
         self.assert_owner();
         if self.state != state {
-            env::log(
+            env::log_str(
                 format!(
                     "Contract state changed from {} to {} by {}",
                     self.state, state, env::predecessor_account_id()
-                ).as_bytes(),
+                ).as_str(),
             );
             self.state = state;
         }
@@ -46,27 +46,27 @@ impl Contract {
     }
 
     /// Add whitelisted tokens with new tokens. Only can be called by owner.
-    pub fn add_whitelisted_tokens(&mut self, tokens: Vec<ValidAccountId>) {
+    pub fn add_whitelisted_tokens(&mut self, tokens: Vec<AccountId>) {
         self.assert_owner();
         for token in tokens {
-            let opt = self.token_list.get(token.as_ref());
+            let opt = self.token_list.get(&token);
             if opt.is_some() {
-                self.whitelisted_tokens.insert(token.as_ref());
+                self.whitelisted_tokens.insert(&token);
             }
         }
     }
 
     /// Remove whitelisted token. Only can be called by owner.
-    pub fn remove_whitelisted_tokens(&mut self, tokens: Vec<ValidAccountId>) {
+    pub fn remove_whitelisted_tokens(&mut self, tokens: Vec<AccountId>) {
         self.assert_owner();
         for token in tokens {
-            self.whitelisted_tokens.remove(token.as_ref());
+            self.whitelisted_tokens.remove(&token);
         }
     }
 
     /// Add token. Only can be called by owner.
     pub fn add_token_list(&mut self, name: String, symbol: String, standard: String,
-                          decimals: u32, address: ValidAccountId, feed_address: ValidAccountId,
+                          decimals: u32, address: AccountId, feed_address: AccountId,
                           collateral_ratio: u128, state: u8) {
         self.assert_owner();
         let asset = Asset {
@@ -74,36 +74,36 @@ impl Contract {
             symbol,
             standard,
             decimals,
-            address: address.as_ref().clone(),
-            feed_address: feed_address.as_ref().clone(),
+            address: address.clone(),
+            feed_address,
             collateral_ratio,
             state,
         };
-        self.token_list.insert(address.as_ref(), &asset);
+        self.token_list.insert(&address, &asset);
     }
 
     /// Add whitelisted tokens with new rafts. Only can be called by owner.
-    pub fn add_whitelisted_rafts(&mut self, rafts: Vec<ValidAccountId>) {
+    pub fn add_whitelisted_rafts(&mut self, rafts: Vec<AccountId>) {
         self.assert_owner();
         for raft in rafts {
-            let opt = self.raft_list.get(raft.as_ref());
+            let opt = self.raft_list.get(&raft);
             if opt.is_some() {
-                self.whitelisted_rafts.insert(raft.as_ref());
+                self.whitelisted_rafts.insert(&raft);
             }
         }
     }
 
     /// Remove whitelisted raft. Only can be called by owner.
-    pub fn remove_whitelisted_rafts(&mut self, rafts: Vec<ValidAccountId>) {
+    pub fn remove_whitelisted_rafts(&mut self, rafts: Vec<AccountId>) {
         self.assert_owner();
         for raft in rafts {
-            self.whitelisted_rafts.remove(raft.as_ref());
+            self.whitelisted_rafts.remove(&raft);
         }
     }
 
     /// Add raft. Only can be called by owner.
     pub fn add_raft_list(&mut self, name: String, symbol: String, standard: String,
-                          decimals: u32, address: ValidAccountId, feed_address: ValidAccountId,
+                          decimals: u32, address: AccountId, feed_address: AccountId,
                           state: u8) {
         self.assert_owner();
         let asset = Asset {
@@ -111,15 +111,15 @@ impl Contract {
             symbol,
             standard,
             decimals,
-            address: address.as_ref().clone(),
-            feed_address: feed_address.as_ref().clone(),
+            address: address.clone(),
+            feed_address,
             collateral_ratio: 0,
             state,
         };
-        self.raft_list.insert(address.as_ref(), &asset);
+        self.raft_list.insert(&address, &asset);
     }
 
     pub(crate) fn assert_owner(&self) {
-        assert_eq!(env::predecessor_account_id(), self.owner_id, "{}", errors::Unauthorized);
+        assert_eq!(env::predecessor_account_id(), self.owner_id, "{}", errors::UNAUTHORIZED);
     }
 }
