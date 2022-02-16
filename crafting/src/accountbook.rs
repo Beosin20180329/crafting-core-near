@@ -20,32 +20,32 @@ impl AccountBook {
         }
     }
 
-    pub(crate) fn mint(&mut self, user: &AccountId, raft: &AccountId, raft_amount: Balance) {
-        let old_amount = self.query_raft_amount(raft);
-        self.insert_raft_amount(raft, old_amount + raft_amount);
+    pub(crate) fn mint(&mut self, user: &AccountId, raft_id: &AccountId, raft_amount: Balance) {
+        let old_amount = self.query_raft_amount(raft_id);
+        self.insert_raft_amount(raft_id, old_amount + raft_amount);
 
-        let old_amount = self.query_user_raft_amount(user, raft);
-        self.insert_user_raft_amount(user, raft, old_amount + raft_amount);
+        let old_amount = self.query_user_raft_amount(user, raft_id);
+        self.insert_user_raft_amount(user, raft_id, old_amount + raft_amount);
     }
 
-    pub(crate) fn query_raft_amount(&self, raft: &AccountId) -> Balance {
-        self.raft_amounts.get(raft).unwrap_or(0)
+    pub(crate) fn query_raft_amount(&self, raft_id: &AccountId) -> Balance {
+        self.raft_amounts.get(raft_id).unwrap_or(0)
     }
 
-    pub(crate) fn insert_raft_amount(&mut self, raft: &AccountId, amount: Balance) {
-        self.raft_amounts.insert(raft, &amount);
+    pub(crate) fn insert_raft_amount(&mut self, raft_id: &AccountId, amount: Balance) {
+        self.raft_amounts.insert(raft_id, &amount);
     }
 
-    pub(crate) fn query_user_raft_amount(&self, user: &AccountId, raft: &AccountId) -> Balance {
-        self.user_raft_amounts.get(&(user.clone(), raft.clone())).unwrap_or(0)
+    pub(crate) fn query_user_raft_amount(&self, user: &AccountId, raft_id: &AccountId) -> Balance {
+        self.user_raft_amounts.get(&(user.clone(), raft_id.clone())).unwrap_or(0)
     }
 
-    pub(crate) fn insert_user_raft_amount(&mut self, user: &AccountId, raft: &AccountId, amount: Balance) {
-        self.user_raft_amounts.insert(&(user.clone(), raft.clone()), &amount);
+    pub(crate) fn insert_user_raft_amount(&mut self, user: &AccountId, raft_id: &AccountId, amount: Balance) {
+        self.user_raft_amounts.insert(&(user.clone(), raft_id.clone()), &amount);
     }
 
-    pub(crate) fn calc_raft_value(&self, price_oracle: &oracle::PriceInfo, raft: &AccountId, amount: Balance) -> u128 {
-        price_oracle.get_price(raft) * amount
+    pub(crate) fn calc_raft_value(&self, price_oracle: &oracle::PriceInfo, raft_id: &AccountId, amount: Balance) -> u128 {
+        price_oracle.get_price(raft_id) * amount
     }
 
     pub(crate) fn calc_raft_total_value(&self, price_oracle: &oracle::PriceInfo) -> u128 {
