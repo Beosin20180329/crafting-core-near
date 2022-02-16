@@ -6,9 +6,9 @@ use near_sdk::{
 };
 use near_sdk::borsh::{self, BorshDeserialize, BorshSerialize};
 use near_sdk::collections::UnorderedMap;
-use near_sdk::json_types::{ValidAccountId, U128};
+use near_sdk::json_types::U128;
 
-use crate::utils::{ext_self, GAS_FOR_FT_TRANSFER, GAS_FOR_RESOLVE_TRANSFER};
+use crate::utils::{ext_self, NO_DEPOSIT, ONE_YOCTO, GAS_FOR_FT_TRANSFER, GAS_FOR_RESOLVE_TRANSFER};
 use crate::*;
 
 const U32_STORAGE: StorageUsage = 4;
@@ -37,7 +37,7 @@ pub enum VAccount {
 }
 
 impl VAccount {
-    pub fn into_current(self, account_id: &AccountId) -> Account {
+    pub fn into_current(self, _account_id: &AccountId) -> Account {
         match self {
             VAccount::Current(account) => account,
         }
@@ -83,7 +83,7 @@ impl Account {
         self.tokens.keys().collect()
     }
 
-    /// Deposit amount to the balance of given token,
+    /// Deposit amount to the balance of given token.
     /// if given token not register and not enough storage, deposit fails
     pub(crate) fn deposit_with_storage_check(&mut self, token: &AccountId, amount: Balance) -> bool {
         if let Some(balance) = self.tokens.get(token) {
@@ -119,7 +119,7 @@ impl Account {
             assert!(x >= amount, "{}", errors::NOT_ENOUGH_TOKENS);
             self.tokens.insert(token, &(x - amount));
         } else {
-            env::panic(errors::TOKEN_NOT_REG.as_bytes());
+            env::panic_str(errors::TOKEN_NOT_REG);
         }
     }
 
@@ -142,7 +142,10 @@ impl Account {
 
     /// Asserts there is sufficient amount of $NEAR to cover storage usage.
     pub fn assert_storage_usage(&self) {
-        assert!(self.storage_usage() <= self.near_amount, "{}", errors::INSUFFICIENT_STORAGE);
+        assert!(
+            self.storage_usage() <= self.near_amount,
+            "{}",
+            errors::INSUFFICIENT_STORAGE);
     }
 
     /// Returns minimal account deposit storage usage possible.
@@ -151,11 +154,10 @@ impl Account {
     }
 
     /// Registers given token and set balance to 0.
-    pub(crate) fn register(&mut self, token_ids: &Vec<ValidAccountId>) {
+    pub(crate) fn register(&mut self, token_ids: &Vec<AccountId>) {
         for token_id in token_ids {
-            let t = token_id.as_ref();
-            if self.get_balance(t).is_none() {
-                self.tokens.insert(t, &0);
+            if self.get_balance(token_id).is_none() {
+                self.tokens.insert(token_id, &0);
             }
         }
     }
@@ -170,10 +172,11 @@ impl Account {
 
 #[near_bindgen]
 impl Contract {
+
     /// Registers given token in the user's account deposit.
     /// Fails if not enough balance on this account to cover storage.
     #[payable]
-    pub fn register_tokens(&mut self, token_ids: Vec<ValidAccountId>) {
+    pub fn register_tokens(&mut self, token_ids: Vec<AccountId>) {
         assert_one_yocto();
         self.assert_contract_running();
         let sender_id = env::predecessor_account_id();
@@ -185,43 +188,30 @@ impl Contract {
     /// Unregister given token from user's account deposit.
     /// Panics if the balance of any given token is non 0.
     #[payable]
-    pub fn unregister_tokens(&mut self, token_ids: Vec<ValidAccountId>) {
+    pub fn unregister_tokens(&mut self, token_ids: Vec<AccountId>) {
         assert_one_yocto();
         self.assert_contract_running();
         let sender_id = env::predecessor_account_id();
         let mut account = self.internal_unwrap_account(&sender_id);
         for token_id in token_ids {
-            account.unregister(token_id.as_ref());
+            account.unregister(&token_id);
         }
         self.internal_save_account(&sender_id, account);
     }
 
-    /// Withdraws given token from the deposits of given user.
-    /// Optional unregister will try to remove record of this token from AccountDeposit for given user.
-    /// Unregister will fail if the left over balance is non 0.
-    // #[payable]
-    // pub fn withdraw(&mut self, token_id: ValidAccountId, amount: U128,
-    //                 unregister: Option<bool>) -> Promise {
-    //     assert_one_yocto();
-    //     self.assert_contract_running();
-    //     let token_id: AccountId = token_id.into();
-    //     let amount: u128 = amount.into();
-    //     assert!(amount > 0, "{}", errors::ILLEGAL_WITHDRAW_AMOUNT);
-    //     let sender_id = env::predecessor_account_id();
-    //     let mut account = self.internal_unwrap_account(&sender_id);
-    //     // subtraction and deregistration will be reverted if the promise fails.
-    //     account.withdraw(&token_id, amount);
-    //     if unregister == Some(true) {
-    //         account.unregister(&token_id);
-    //     }
-    //     self.internal_save_account(&sender_id, account);
-    //     self.internal_send_tokens(&sender_id, &token_id, amount)
-    // }
-
     #[private]
-    pub fn exchange_callback_post_withdraw(&mut self, token_id: AccountId,
-                                           sender_id: AccountId, amount: U128) {
-        assert_eq!(env::promise_results_count(), 1, "{}", errors::CALLBACK_POST_WITHDRAW_INVALID);
+    pub fn exchange_callback_post_withdraw(
+        &mut self,
+        token_id: AccountId,
+        sender_id: AccountId,
+        amount: U128
+    ) {
+        assert_eq!(
+            env::promise_results_count(),
+            1,
+            "{}",
+            errors::CALLBACK_POST_WITHDRAW_INVALID
+        );
 
         match env::promise_result(0) {
             PromiseResult::NotReady => unreachable!(),
@@ -235,18 +225,18 @@ impl Contract {
                         // cause storage already checked, here can directly save
                         self.accounts.insert(&sender_id, &account.into());
                     } else {
-                        env::log(format!(
-                                "Account {} has not enough storage. Depositing to owner.",
-                                sender_id
-                            ).as_bytes(),
+                        env::log_str(format!(
+                            "Account {} has not enough storage. Depositing to owner.",
+                            sender_id
+                        ).as_str(),
                         );
                         failed = true;
                     }
                 } else {
-                    env::log(format!(
-                            "Account {} is not registered. Depositing to owner.",
-                            sender_id
-                        ).as_bytes(),
+                    env::log_str(format!(
+                        "Account {} is not registered. Depositing to owner.",
+                        sender_id
+                    ).as_str(),
                     );
                     failed = true;
                 }
@@ -259,6 +249,7 @@ impl Contract {
 }
 
 impl Contract {
+
     /// Checks that account has enough storage to be stored and saves it into collection.
     /// This should be only place to directly use `self.accounts`.
     pub(crate) fn internal_save_account(&mut self, account_id: &AccountId, account: Account) {
@@ -274,7 +265,7 @@ impl Contract {
             lostfound.deposit(token_id, amount);
             self.accounts.insert(&self.owner_id, &lostfound.into());
         } else {
-            env::panic("ERR: non-whitelisted token can NOT deposit into lost-found.".as_bytes());
+            env::panic_str("ERR: non-whitelisted token can NOT deposit into lost-found.");
         }
     }
 
@@ -304,7 +295,12 @@ impl Contract {
 
     /// Record deposit of some number of tokens to this contract.
     /// Fails if account is not registered or if token isn't whitelisted.
-    pub(crate) fn internal_deposit(&mut self, sender_id: &AccountId, token_id: &AccountId, amount: Balance) {
+    pub(crate) fn internal_deposit(
+        &mut self,
+        sender_id: &AccountId,
+        token_id: &AccountId,
+        amount: Balance,
+    ) {
         let mut account = self.internal_unwrap_account(sender_id);
         assert!(
             self.whitelisted_tokens.contains(token_id)
@@ -317,7 +313,8 @@ impl Contract {
     }
 
     pub fn internal_get_account(&self, account_id: &AccountId) -> Option<Account> {
-        self.accounts.get(account_id)
+        self.accounts
+            .get(account_id)
             .map(|va| va.into_current(account_id))
     }
 
@@ -332,7 +329,11 @@ impl Contract {
     }
 
     /// Returns current balance of given token for given user. If there is nothing recorded, returns 0.
-    pub(crate) fn internal_get_deposit(&self, sender_id: &AccountId, token_id: &AccountId) -> Balance {
+    pub(crate) fn internal_get_deposit(
+        &self,
+        sender_id: &AccountId,
+        token_id: &AccountId,
+    ) -> Balance {
         self.internal_get_account(sender_id)
             .and_then(|x| x.get_balance(token_id))
             .unwrap_or(0)
@@ -340,13 +341,26 @@ impl Contract {
 
     /// Sends given amount to given user and if it fails, returns it back to user's balance.
     /// Tokens must already be subtracted from internal balance.
-    pub(crate) fn internal_send_tokens(&self, sender_id: &AccountId,
-                                       token_id: &AccountId, amount: Balance) -> Promise {
-        ext_fungible_token::ft_transfer(sender_id.clone(), U128(amount), None, token_id,
-            1, GAS_FOR_FT_TRANSFER)
-            .then(ext_self::exchange_callback_post_withdraw(
-                token_id.clone(), sender_id.clone(), U128(amount), &env::current_account_id(),
-                0, GAS_FOR_RESOLVE_TRANSFER,
-            ))
+    pub(crate) fn internal_send_tokens(
+        &self,
+        sender_id: &AccountId,
+        token_id: &AccountId,
+        amount: Balance,
+    ) -> Promise {
+        ext_fungible_token::ft_transfer(
+            sender_id.clone(),
+            U128(amount),
+            None,
+            token_id.clone(),
+            ONE_YOCTO,
+            GAS_FOR_FT_TRANSFER,
+        ).then(ext_self::exchange_callback_post_withdraw(
+            token_id.clone(),
+            sender_id.clone(),
+            U128(amount),
+            env::current_account_id(),
+            NO_DEPOSIT,
+            GAS_FOR_RESOLVE_TRANSFER,
+        ))
     }
 }
