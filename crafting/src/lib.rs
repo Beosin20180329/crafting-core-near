@@ -51,9 +51,9 @@ impl fmt::Display for RunningState {
 #[serde(crate = "near_sdk::serde")]
 pub struct Collateral {
     issuer: AccountId,
-    token: AccountId,
+    token_id: AccountId,
     token_amount: Balance,
-    raft: AccountId,
+    raft_id: AccountId,
     raft_amount: Balance,
     join_debtpool: bool,
     block_index: BlockHeight,
@@ -149,13 +149,13 @@ impl Contract {
     }
 
     #[payable]
-    pub fn mint(&mut self, token: AccountId, token_amount: Balance,
-                raft: AccountId, raft_amount: Balance, join_debtpool: bool) -> Promise {
+    pub fn mint(&mut self, token_id: AccountId, token_amount: Balance,
+                raft_id: AccountId, raft_amount: Balance, join_debtpool: bool) -> Promise {
         assert_one_yocto();
         self.assert_contract_running();
 
-        assert!(self.is_in_whitelisted_tokens(&token));
-        assert!(self.is_in_whitelisted_rafts(&raft));
+        assert!(self.is_in_whitelisted_tokens(&token_id));
+        assert!(self.is_in_whitelisted_rafts(&raft_id));
 
         assert!(token_amount > 0, "{}", errors::NO_ATTACHED_DEPOSIT);
         assert!(raft_amount > 0, "{}", errors::SYNTHETIC_AMOUNT_ERROR);
@@ -166,14 +166,14 @@ impl Contract {
             U128(token_amount),
             None,
             "".to_string(),
-            token.clone(),
+            token_id.clone(),
             utils::ONE_YOCTO,
             utils::GAS_FOR_FT_TRANSFER,
         ).then(ext_self::mint_callback(
             sender_id,
-            token,
+            token_id,
             token_amount,
-            raft,
+            raft_id,
             raft_amount,
             join_debtpool,
             env::current_account_id(),
@@ -183,40 +183,40 @@ impl Contract {
     }
 
     #[private]
-    fn mint_callback(&mut self, sender_id: AccountId, token: AccountId, token_amount: Balance,
-                     raft: AccountId, raft_amount: Balance, join_debtpool: bool) {
+    fn mint_callback(&mut self, sender_id: AccountId, token_id: AccountId, token_amount: Balance,
+                     raft_id: AccountId, raft_amount: Balance, join_debtpool: bool) {
         if join_debtpool {
-            let token_decimals = self.query_token(&token).unwrap().decimals;
-            let raft_decimals = self.query_raft(&raft).unwrap().decimals;
+            let token_decimals = self.query_token(&token_id).unwrap().decimals;
+            let raft_decimals = self.query_raft(&raft_id).unwrap().decimals;
 
-            let leverage_ratio = (self.price_oracle.get_price(&raft) * raft_amount * 10u128.pow(token_decimals))
-                / (self.price_oracle.get_price(&token) * token_amount * 10u128.pow(raft_decimals));
+            let leverage_ratio = (self.price_oracle.get_price(&raft_id) * raft_amount * 10u128.pow(token_decimals))
+                / (self.price_oracle.get_price(&token_id) * token_amount * 10u128.pow(raft_decimals));
 
             let (min, max) = self.leverage_ratio;
             assert!(leverage_ratio >= min.into());
             assert!(leverage_ratio <= max.into());
 
-            self.debt_pool.join(&self.price_oracle, &sender_id, &raft, raft_amount);
+            self.debt_pool.join(&self.price_oracle, &sender_id, &raft_id, raft_amount);
         } else {
-            let token_asset = self.query_token(&token).unwrap();
-            let raft_asset = self.query_token(&raft).unwrap();
+            let token_asset = self.query_token(&token_id).unwrap();
+            let raft_asset = self.query_token(&raft_id).unwrap();
 
             let token_decimals = token_asset.decimals;
             let raft_decimals = raft_asset.decimals;
 
-            let collateral_ratio = (self.price_oracle.get_price(&token) * token_amount * 10u128.pow(raft_decimals) * 100)
-                / (self.price_oracle.get_price(&raft) * raft_amount * 10u128.pow(token_decimals));
+            let collateral_ratio = (self.price_oracle.get_price(&token_id) * token_amount * 10u128.pow(raft_decimals) * 100)
+                / (self.price_oracle.get_price(&raft_id) * raft_amount * 10u128.pow(token_decimals));
 
             assert!(collateral_ratio >= token_asset.collateral_ratio);
 
-            self.account_book.mint(&sender_id, &raft, raft_amount);
+            self.account_book.mint(&sender_id, &raft_id, raft_amount);
         }
 
         let collateral = Collateral {
             issuer: sender_id,
-            token: token.clone(),
+            token_id: token_id.clone(),
             token_amount,
-            raft: raft.clone(),
+            raft_id: raft_id.clone(),
             raft_amount,
             join_debtpool,
             block_index: env::block_height(),
@@ -227,73 +227,73 @@ impl Contract {
         self.collaterals.push(&collateral);
     }
 
-    pub fn swap_in_debtpool(&mut self, old_raft: AccountId, new_raft: AccountId, swap_amount: Balance) {
+    pub fn swap_in_debtpool(&mut self, old_raft_id: AccountId, new_raft_id: AccountId, swap_amount: Balance) {
         self.assert_contract_running();
 
-        assert!(self.is_in_whitelisted_rafts(&old_raft));
-        assert!(self.is_in_whitelisted_rafts(&new_raft));
+        assert!(self.is_in_whitelisted_rafts(&old_raft_id));
+        assert!(self.is_in_whitelisted_rafts(&new_raft_id));
         assert!(swap_amount > 0);
 
         let sender_id = env::predecessor_account_id();
 
-        let old_raft_amount = self.debt_pool.query_raft_amount(&old_raft);
-        let old_user_raft_amount = self.debt_pool.query_user_raft_amount(&sender_id, &old_raft);
+        let old_raft_amount = self.debt_pool.query_raft_amount(&old_raft_id);
+        let old_user_raft_amount = self.debt_pool.query_user_raft_amount(&sender_id, &old_raft_id);
         assert!(old_user_raft_amount >= swap_amount);
 
         // charge transaction fee
         let exchange_fee_amount = swap_amount * self.exchange_fee as u128 / utils::FEE_DIVISOR as u128;
-        let owner_raft_amount = self.debt_pool.query_user_raft_amount(&self.owner_id, &old_raft);
-        self.debt_pool.insert_user_raft_amount(&self.owner_id, &old_raft, owner_raft_amount + exchange_fee_amount);
+        let owner_raft_amount = self.debt_pool.query_user_raft_amount(&self.owner_id, &old_raft_id);
+        self.debt_pool.insert_user_raft_amount(&self.owner_id, &old_raft_id, owner_raft_amount + exchange_fee_amount);
 
-        self.debt_pool.calc_sub_raft_amount(&old_raft, &old_raft_amount, swap_amount - exchange_fee_amount);
-        self.debt_pool.insert_user_raft_amount(&sender_id, &old_raft, old_user_raft_amount - swap_amount);
+        self.debt_pool.calc_sub_raft_amount(&old_raft_id, &old_raft_amount, swap_amount - exchange_fee_amount);
+        self.debt_pool.insert_user_raft_amount(&sender_id, &old_raft_id, old_user_raft_amount - swap_amount);
 
-        let new_swap_amount = self.debt_pool.calc_raft_value(&self.price_oracle, &old_raft, swap_amount - exchange_fee_amount)
-            / self.price_oracle.get_price(&new_raft);
-        let new_raft_amount = self.debt_pool.query_raft_amount(&new_raft);
-        self.debt_pool.calc_add_raft_amount(&new_raft, &new_raft_amount, new_swap_amount);
+        let new_swap_amount = self.debt_pool.calc_raft_value(&self.price_oracle, &old_raft_id, swap_amount - exchange_fee_amount)
+            / self.price_oracle.get_price(&new_raft_id);
+        let new_raft_amount = self.debt_pool.query_raft_amount(&new_raft_id);
+        self.debt_pool.calc_add_raft_amount(&new_raft_id, &new_raft_amount, new_swap_amount);
 
-        let new_user_raft_amount = self.debt_pool.query_user_raft_amount(&sender_id, &new_raft);
-        self.debt_pool.insert_user_raft_amount(&sender_id, &new_raft, new_user_raft_amount + new_swap_amount);
+        let new_user_raft_amount = self.debt_pool.query_user_raft_amount(&sender_id, &new_raft_id);
+        self.debt_pool.insert_user_raft_amount(&sender_id, &new_raft_id, new_user_raft_amount + new_swap_amount);
     }
 
-    pub fn swap_in_accountbook(&mut self, old_raft: AccountId, new_raft: AccountId, swap_amount: Balance) {
+    pub fn swap_in_accountbook(&mut self, old_raft_id: AccountId, new_raft_id: AccountId, swap_amount: Balance) {
         self.assert_contract_running();
 
-        assert!(self.is_in_whitelisted_rafts(&old_raft));
-        assert!(self.is_in_whitelisted_rafts(&new_raft));
+        assert!(self.is_in_whitelisted_rafts(&old_raft_id));
+        assert!(self.is_in_whitelisted_rafts(&new_raft_id));
         assert!(swap_amount > 0);
 
         let sender_id = env::predecessor_account_id();
 
-        let old_raft_amount = self.account_book.query_raft_amount(&old_raft);
+        let old_raft_amount = self.account_book.query_raft_amount(&old_raft_id);
         assert!(old_raft_amount >= swap_amount);
-        let old_user_raft_amount = self.account_book.query_user_raft_amount(&sender_id, &old_raft);
+        let old_user_raft_amount = self.account_book.query_user_raft_amount(&sender_id, &old_raft_id);
         assert!(old_user_raft_amount >= swap_amount);
 
         // charge transaction fee
         let exchange_fee_amount = swap_amount * self.exchange_fee as u128 / utils::FEE_DIVISOR as u128;
-        let owner_raft_amount = self.account_book.query_user_raft_amount(&self.owner_id, &old_raft);
-        self.account_book.insert_user_raft_amount(&self.owner_id, &old_raft, owner_raft_amount + exchange_fee_amount);
+        let owner_raft_amount = self.account_book.query_user_raft_amount(&self.owner_id, &old_raft_id);
+        self.account_book.insert_user_raft_amount(&self.owner_id, &old_raft_id, owner_raft_amount + exchange_fee_amount);
 
         // processing in the account book
-        self.account_book.insert_raft_amount(&old_raft, old_raft_amount - swap_amount + exchange_fee_amount);
-        self.account_book.insert_user_raft_amount(&sender_id, &old_raft, old_user_raft_amount - swap_amount);
+        self.account_book.insert_raft_amount(&old_raft_id, old_raft_amount - swap_amount + exchange_fee_amount);
+        self.account_book.insert_user_raft_amount(&sender_id, &old_raft_id, old_user_raft_amount - swap_amount);
 
-        let new_swap_amount = self.price_oracle.get_price(&old_raft) * (swap_amount - exchange_fee_amount)
-            / self.price_oracle.get_price(&new_raft);
-        let new_raft_amount = self.account_book.query_raft_amount(&new_raft);
-        self.account_book.insert_raft_amount(&new_raft, new_raft_amount + new_swap_amount);
+        let new_swap_amount = self.price_oracle.get_price(&old_raft_id) * (swap_amount - exchange_fee_amount)
+            / self.price_oracle.get_price(&new_raft_id);
+        let new_raft_amount = self.account_book.query_raft_amount(&new_raft_id);
+        self.account_book.insert_raft_amount(&new_raft_id, new_raft_amount + new_swap_amount);
 
-        let new_user_raft_amount = self.account_book.query_user_raft_amount(&sender_id, &new_raft);
-        self.account_book.insert_user_raft_amount(&sender_id, &new_raft, new_user_raft_amount + new_swap_amount);
+        let new_user_raft_amount = self.account_book.query_user_raft_amount(&sender_id, &new_raft_id);
+        self.account_book.insert_user_raft_amount(&sender_id, &new_raft_id, new_user_raft_amount + new_swap_amount);
 
         // processing in the debt pool
-        let old_raft_amount = self.debt_pool.query_raft_amount(&old_raft);
-        self.debt_pool.calc_sub_raft_amount(&old_raft, &old_raft_amount, new_swap_amount);
+        let old_raft_amount = self.debt_pool.query_raft_amount(&old_raft_id);
+        self.debt_pool.calc_sub_raft_amount(&old_raft_id, &old_raft_amount, new_swap_amount);
 
-        let new_raft_amount = self.debt_pool.query_raft_amount(&new_raft);
-        self.debt_pool.calc_add_raft_amount(&new_raft, &new_raft_amount, new_swap_amount);
+        let new_raft_amount = self.debt_pool.query_raft_amount(&new_raft_id);
+        self.debt_pool.calc_add_raft_amount(&new_raft_id, &new_raft_amount, new_swap_amount);
     }
 
     #[payable]
@@ -376,9 +376,9 @@ impl Contract {
             let collateral = opt_collateral.unwrap();
 
             let mut account = self.internal_unwrap_account(&sender_id);
-            account.withdraw(&collateral.token, collateral.token_amount);
+            account.withdraw(&collateral.token_id, collateral.token_amount);
             self.internal_save_account(&sender_id, account);
-            self.internal_send_tokens(&sender_id, &collateral.token, collateral.token_amount);
+            self.internal_send_tokens(&sender_id, &collateral.token_id, collateral.token_amount);
         }
 
         PromiseOrValue::Value(U128(0))
@@ -398,26 +398,26 @@ impl Contract {
         assert_eq!(collateral.join_debtpool, false);
         assert_eq!(collateral.state, 0);
 
-        let raft_amount = self.account_book.query_raft_amount(&collateral.raft);
-        let user_raft_amount = self.account_book.query_user_raft_amount(&sender_id, &collateral.raft);
+        let raft_amount = self.account_book.query_raft_amount(&collateral.raft_id);
+        let user_raft_amount = self.account_book.query_user_raft_amount(&sender_id, &collateral.raft_id);
         let interest_fee_amount = collateral.raft_amount * self.interest_fee as u128 / utils::FEE_DIVISOR as u128;
         assert!(raft_amount > collateral.raft_amount + interest_fee_amount);
         assert!(user_raft_amount > collateral.raft_amount + interest_fee_amount);
 
         // charge interest fee
-        let owner_raft_amount = self.account_book.query_user_raft_amount(&self.owner_id, &collateral.raft);
-        self.account_book.insert_user_raft_amount(&self.owner_id, &collateral.raft, owner_raft_amount + interest_fee_amount);
+        let owner_raft_amount = self.account_book.query_user_raft_amount(&self.owner_id, &collateral.raft_id);
+        self.account_book.insert_user_raft_amount(&self.owner_id, &collateral.raft_id, owner_raft_amount + interest_fee_amount);
 
         // subtract user raft amount
-        self.account_book.insert_user_raft_amount(&sender_id, &collateral.raft, user_raft_amount - collateral.raft_amount - interest_fee_amount);
+        self.account_book.insert_user_raft_amount(&sender_id, &collateral.raft_id, user_raft_amount - collateral.raft_amount - interest_fee_amount);
 
         // subtract total raft amount
-        self.account_book.insert_raft_amount(&collateral.raft, raft_amount - collateral.raft_amount);
+        self.account_book.insert_raft_amount(&collateral.raft_id, raft_amount - collateral.raft_amount);
 
         let mut account = self.internal_unwrap_account(&sender_id);
-        account.withdraw(&collateral.token, collateral.token_amount);
+        account.withdraw(&collateral.token_id, collateral.token_amount);
         self.internal_save_account(&sender_id, account);
-        self.internal_send_tokens(&sender_id, &collateral.token, collateral.token_amount)
+        self.internal_send_tokens(&sender_id, &collateral.token_id, collateral.token_amount)
     }
 
     #[payable]
@@ -488,28 +488,28 @@ impl Contract {
         };
     }
 
-    fn is_in_whitelisted_tokens(&self, token: &AccountId) -> bool {
-        if self.whitelisted_tokens.contains(token) {
+    fn is_in_whitelisted_tokens(&self, token_id: &AccountId) -> bool {
+        if self.whitelisted_tokens.contains(token_id) {
             return true;
         }
 
         false
     }
 
-    fn query_token(&self, token: &AccountId) -> Option<Asset> {
-        self.token_list.get(token)
+    fn query_token(&self, token_id: &AccountId) -> Option<Asset> {
+        self.token_list.get(token_id)
     }
 
-    fn is_in_whitelisted_rafts(&self, raft: &AccountId) -> bool {
-        if self.whitelisted_rafts.contains(raft) {
+    fn is_in_whitelisted_rafts(&self, raft_id: &AccountId) -> bool {
+        if self.whitelisted_rafts.contains(raft_id) {
             return true;
         }
 
         false
     }
 
-    fn query_raft(&self, raft: &AccountId) -> Option<Asset> {
-        self.raft_list.get(raft)
+    fn query_raft(&self, raft_id: &AccountId) -> Option<Asset> {
+        self.raft_list.get(raft_id)
     }
 
     fn query_rusd(&self) -> Option<Asset> {
