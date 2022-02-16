@@ -32,32 +32,32 @@ impl DebtPool {
     }
 
     pub(crate) fn join(&mut self, price_oracle: &oracle::PriceInfo, user: &AccountId,
-                       raft: &AccountId, raft_amount: Balance) {
+                       raft_id: &AccountId, raft_amount: Balance) {
         if self.raft_amounts.is_empty() {
-            self.insert_raft_amount(raft, &WrappedBalance {
+            self.insert_raft_amount(raft_id, &WrappedBalance {
                 amount: raft_amount,
                 is_positive: true,
             });
-            self.insert_user_raft_amount(user, raft, raft_amount);
+            self.insert_user_raft_amount(user, raft_id, raft_amount);
             self.insert_debt_ratio(user.clone(), utils::RATIO_DIVISOR);
         } else {
             let old_total_value = self.calc_raft_total_value(price_oracle);
 
-            let old_raft_amount = self.query_raft_amount(raft);
-            self.calc_add_raft_amount(raft, &old_raft_amount, raft_amount);
+            let old_raft_amount = self.query_raft_amount(raft_id);
+            self.calc_add_raft_amount(raft_id, &old_raft_amount, raft_amount);
 
-            let old_user_raft_amount = self.query_user_raft_amount(user, raft);
-            self.insert_user_raft_amount(user, raft, old_user_raft_amount + raft_amount);
+            let old_user_raft_amount = self.query_user_raft_amount(user, raft_id);
+            self.insert_user_raft_amount(user, raft_id, old_user_raft_amount + raft_amount);
 
-            let join_raft_value = self.calc_raft_value(price_oracle, raft, raft_amount);
+            let join_raft_value = self.calc_raft_value(price_oracle, raft_id, raft_amount);
             let new_total_value = old_total_value + join_raft_value;
 
             self.calc_debt_ratio(old_total_value, new_total_value, user.clone());
         }
     }
 
-    pub(crate) fn query_raft_amount(&self, raft: &AccountId) -> WrappedBalance {
-        let opt_wbalance = self.raft_amounts.get(raft);
+    pub(crate) fn query_raft_amount(&self, raft_id: &AccountId) -> WrappedBalance {
+        let opt_wbalance = self.raft_amounts.get(raft_id);
         if opt_wbalance.is_some() {
             opt_wbalance.unwrap();
         }
@@ -68,36 +68,36 @@ impl DebtPool {
         }
     }
 
-    pub(crate) fn insert_raft_amount(&mut self, raft: &AccountId, amount: &WrappedBalance) {
-        self.raft_amounts.insert(raft, amount);
+    pub(crate) fn insert_raft_amount(&mut self, raft_id: &AccountId, amount: &WrappedBalance) {
+        self.raft_amounts.insert(raft_id, amount);
     }
 
-    pub(crate) fn query_user_raft_amount(&self, user: &AccountId, raft: &AccountId) -> Balance {
-        self.user_raft_amounts.get(&(user.clone(), raft.clone())).unwrap_or(0)
+    pub(crate) fn query_user_raft_amount(&self, user: &AccountId, raft_id: &AccountId) -> Balance {
+        self.user_raft_amounts.get(&(user.clone(), raft_id.clone())).unwrap_or(0)
     }
 
     pub(crate) fn query_user_raft_amounts(&self, user: &AccountId) -> Vec<(AccountId, Balance)> {
         let mut vec: Vec<(AccountId, Balance)> = Vec::new();
-        for (raft, _) in self.raft_amounts.iter() {
-            let amount = self.query_user_raft_amount(user, &raft);
+        for (raft_id, _) in self.raft_amounts.iter() {
+            let amount = self.query_user_raft_amount(user, &raft_id);
             if amount != 0 {
-                vec.push( (raft, amount));
+                vec.push( (raft_id, amount));
             }
         }
 
         vec
     }
 
-    pub(crate) fn insert_user_raft_amount(&mut self, user: &AccountId, raft: &AccountId, amount: Balance) {
-        self.user_raft_amounts.insert(&(user.clone(), raft.clone()), &amount);
+    pub(crate) fn insert_user_raft_amount(&mut self, user: &AccountId, raft_id: &AccountId, amount: Balance) {
+        self.user_raft_amounts.insert(&(user.clone(), raft_id.clone()), &amount);
     }
 
-    pub(crate) fn remove_user_raft_amount(&mut self, user: &AccountId, raft: &AccountId) {
-        self.user_raft_amounts.remove(&(user.clone(), raft.clone()));
+    pub(crate) fn remove_user_raft_amount(&mut self, user: &AccountId, raft_id: &AccountId) {
+        self.user_raft_amounts.remove(&(user.clone(), raft_id.clone()));
     }
 
-    pub(crate) fn calc_raft_value(&self, price_oracle: &oracle::PriceInfo, raft: &AccountId, amount: Balance) -> u128 {
-        price_oracle.get_price(raft) * amount
+    pub(crate) fn calc_raft_value(&self, price_oracle: &oracle::PriceInfo, raft_id: &AccountId, amount: Balance) -> u128 {
+        price_oracle.get_price(raft_id) * amount
     }
 
     pub(crate) fn query_debt_ratio(&self, user: &AccountId) -> u128 {
@@ -161,20 +161,20 @@ impl DebtPool {
         }
     }
 
-    pub(crate) fn calc_add_raft_amount(&mut self, raft: &AccountId, raft_amount: &WrappedBalance, amount: Balance) {
+    pub(crate) fn calc_add_raft_amount(&mut self, raft_id: &AccountId, raft_amount: &WrappedBalance, amount: Balance) {
         if raft_amount.is_positive {
-            self.insert_raft_amount(raft, &WrappedBalance {
+            self.insert_raft_amount(raft_id, &WrappedBalance {
                 amount: raft_amount.amount + amount,
                 is_positive: true,
             });
         } else {
             if raft_amount.amount >= amount {
-                self.insert_raft_amount(raft, &WrappedBalance {
+                self.insert_raft_amount(raft_id, &WrappedBalance {
                     amount: raft_amount.amount - amount,
                     is_positive: false,
                 });
             } else {
-                self.insert_raft_amount(raft, &WrappedBalance {
+                self.insert_raft_amount(raft_id, &WrappedBalance {
                     amount: amount - raft_amount.amount,
                     is_positive: true,
                 });
@@ -182,21 +182,21 @@ impl DebtPool {
         }
     }
 
-    pub(crate) fn calc_sub_raft_amount(&mut self, raft: &AccountId, raft_amount: &WrappedBalance, amount: Balance) {
+    pub(crate) fn calc_sub_raft_amount(&mut self, raft_id: &AccountId, raft_amount: &WrappedBalance, amount: Balance) {
         if raft_amount.is_positive {
             if raft_amount.amount >= amount {
-                self.insert_raft_amount(raft, &WrappedBalance {
+                self.insert_raft_amount(raft_id, &WrappedBalance {
                     amount: raft_amount.amount - amount,
                     is_positive: true,
                 });
             } else {
-                self.insert_raft_amount(raft, &WrappedBalance {
+                self.insert_raft_amount(raft_id, &WrappedBalance {
                     amount: amount - raft_amount.amount,
                     is_positive: false,
                 });
             }
         } else {
-            self.insert_raft_amount(raft, &WrappedBalance {
+            self.insert_raft_amount(raft_id, &WrappedBalance {
                 amount: raft_amount.amount + amount,
                 is_positive: false,
             });
