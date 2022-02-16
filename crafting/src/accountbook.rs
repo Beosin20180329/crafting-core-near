@@ -13,14 +13,14 @@ pub struct AccountBook {
 }
 
 impl AccountBook {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             raft_amounts: UnorderedMap::new(b"r".to_vec()),
             user_raft_amounts: LookupMap::new(b"r".to_vec()),
         }
     }
 
-    pub fn mint(&mut self, user: &AccountId, raft: &AccountId, raft_amount: Balance) {
+    pub(crate) fn mint(&mut self, user: &AccountId, raft: &AccountId, raft_amount: Balance) {
         let old_amount = self.query_raft_amount(raft);
         self.insert_raft_amount(raft, old_amount + raft_amount);
 
@@ -67,5 +67,22 @@ impl AccountBook {
         }
 
         total
+    }
+}
+
+#[near_bindgen]
+impl Contract {
+    #[private]
+    pub fn account_book_callback_deposit(&mut self, sender_id: AccountId, raft_id: AccountId,
+                                         amount: Balance, raft_amount: Balance, user_raft_amount: Balance) {
+        self.account_book.insert_raft_amount(&raft_id, raft_amount + amount);
+        self.account_book.insert_user_raft_amount(&sender_id, &raft_id, user_raft_amount + amount);
+    }
+
+    #[private]
+    pub fn account_book_callback_withdraw(&mut self, sender_id: AccountId, raft_id: AccountId,
+                                          amount: Balance, raft_amount: Balance, user_raft_amount: Balance) {
+        self.account_book.insert_raft_amount(&raft_id, raft_amount - amount);
+        self.account_book.insert_user_raft_amount(&sender_id, &raft_id, user_raft_amount - amount);
     }
 }
