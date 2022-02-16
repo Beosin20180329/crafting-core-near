@@ -7,8 +7,8 @@ edition = "2021"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-near-sdk = "3.1.0"
-near-contract-standards = "3.1.0"
+near-sdk = "4.0.0-pre.6"
+near-contract-standards = "4.0.0-pre.6"
 
 [dev-dependencies]
-token-test = { path = "../token-test" }
+raft-token = { path = "../raft-token" }
